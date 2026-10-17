@@ -4,7 +4,6 @@ import asyncio
 from typing import (
     AsyncGenerator,
     Optional,
-    cast,
 )
 from urllib.parse import quote_plus
 
@@ -325,8 +324,7 @@ class LangGraphAgent:
                 logger.info("graph_interrupted", session_id=session_id, interrupt_value=str(interrupt_value))
                 return [Message(role="assistant", content=str(interrupt_value))]
 
-            openai_msgs = cast(list[dict], convert_to_openai_messages(response["messages"]))
-            create_background_task(memory_service.add(user_id, openai_msgs, config.get("metadata")))
+            create_background_task(memory_service.add(user_id, response["messages"]))
             return self.__process_messages(response["messages"])
         except GraphInterrupt:
             state = await graph.aget_state(config)
@@ -402,8 +400,7 @@ class LangGraphAgent:
                 logger.info("graph_interrupted_stream", session_id=session_id, interrupt_value=str(interrupt_value))
                 yield str(interrupt_value)
             elif state.values and "messages" in state.values:
-                openai_msgs = cast(list[dict], convert_to_openai_messages(state.values["messages"]))
-                create_background_task(memory_service.add(user_id, openai_msgs, config.get("metadata")))
+                create_background_task(memory_service.add(user_id, state.values["messages"]))
         except GraphInterrupt:
             state = await graph.aget_state(config)
             interrupt_value = state.tasks[0].interrupts[0].value if state.tasks else "Waiting for input."

@@ -3,7 +3,10 @@
 from typing import cast
 
 import tiktoken
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import (
+    BaseMessage,
+    HumanMessage,
+)
 from langchain_core.messages import trim_messages as _trim_messages
 
 from app.core.config import settings
@@ -83,6 +86,17 @@ def extract_text_content(content: str | list) -> str:
                     has_summary=bool(block.get("summary")),
                 )
     return "".join(parts)
+
+
+def latest_user_text(messages: list[BaseMessage]) -> str:
+    """Return the text of the most recent user message in a LangGraph message list.
+
+    Walks the list in reverse so the assistant reply, tool calls and tool
+    messages after it are skipped. Returns an empty string when there is no
+    user message.
+    """
+    last_user = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
+    return extract_text_content(last_user.content) if last_user else ""
 
 
 def process_llm_response(response: BaseMessage) -> BaseMessage:
