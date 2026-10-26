@@ -47,6 +47,10 @@ def _build_llm(model: str, **kwargs: Any) -> BaseChatModel:
         if kwargs.keys() & {"base_url", "openai_api_base"} and not kwargs.keys() & {"api_key", "openai_api_key"}:
             raise ValueError(f"'{model}' sets a custom base_url but no api_key; pass that endpoint's own api_key")
         kwargs.setdefault("api_key", _API_KEY)
+        # ResilientInvoker is the only retry layer; SDK retries would multiply attempts
+        # (3 app retries x 3 SDK attempts x N models is how a retry storm starts).
+        kwargs.setdefault("max_retries", 0)
+        kwargs.setdefault("timeout", settings.LLM_ATTEMPT_TIMEOUT)
     return init_chat_model(model, **kwargs)
 
 
@@ -145,6 +149,16 @@ class LLMRegistry:
 
         logger.debug("using_default_llm_instance", model_name=model_name)
         return next(entry["llm"] for entry in cls.LLMS if entry["name"] == model_name)
+
+    @classmethod
+    def supports_tools(cls, model_name: str) -> bool:
+        """Whether a registry entry can do tool calling (``"supports_tools": False`` opts out).
+
+        The fallback ladder skips such models for tool-bound agent calls instead
+        of sending them a request they cannot serve.
+        """
+        config = next((c for c in cls.LLM_CONFIGS if c["name"] == model_name), {})
+        return bool(config.get("supports_tools", True))
 
     @classmethod
     def get_all_names(cls) -> List[str]:

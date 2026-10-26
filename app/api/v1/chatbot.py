@@ -26,7 +26,10 @@ from app.schemas.chat import (
     ChatResponse,
     StreamResponse,
 )
+from app.services.cost_guard import BudgetExceededError
 from app.services.session_naming import maybe_name_session
+
+INTERNAL_ERROR_DETAIL = "The assistant could not process this request. Please try again."
 
 router = APIRouter()
 agent = LangGraphAgent()
@@ -69,9 +72,14 @@ async def chat(
         logger.info("chat_request_processed", session_id=session.id)
 
         return ChatResponse(messages=result)
+    except BudgetExceededError as e:
+        raise HTTPException(status_code=402, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
+        # Never echo the exception to the client: it can carry provider responses, paths or SQL.
         logger.exception("chat_request_failed", session_id=session.id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @router.post("/chat/stream")
@@ -131,7 +139,8 @@ async def chat_stream(
                     session_id=session.id,
                     error=str(e),
                 )
-                error_response = StreamResponse(content=str(e), done=True)
+                detail = str(e) if isinstance(e, BudgetExceededError) else INTERNAL_ERROR_DETAIL
+                error_response = StreamResponse(content=detail, done=True)
                 yield f"data: {json.dumps(error_response.model_dump(mode='json'))}\n\n"
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -142,7 +151,7 @@ async def chat_stream(
             session_id=session.id,
             error=str(e),
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @router.get("/messages", response_model=ChatResponse)
@@ -168,7 +177,7 @@ async def get_session_messages(
         return ChatResponse(messages=messages)
     except Exception as e:
         logger.exception("get_messages_failed", session_id=session.id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @router.delete("/messages")
@@ -191,4 +200,4 @@ async def clear_chat_history(
         return {"message": "Chat history cleared successfully"}
     except Exception as e:
         logger.exception("clear_chat_history_failed", session_id=session.id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)

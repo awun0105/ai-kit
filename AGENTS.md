@@ -57,7 +57,7 @@ This is a production-ready AI agent application built with:
 ## Quick Reference: Critical Rules
 
 ### Import Rules
-- **All imports MUST be at the top of the file** - never add imports inside functions or classes
+- **All imports MUST be at the top of the file** - never add imports inside functions or classes. The one exception: a module from an optional extra (`rerank`, `a2a`, `deep`), imported where it is used with a comment naming the extra, so the core app still imports without it
 
 ### Logging Rules
 - Use **structlog** for all logging
@@ -67,9 +67,9 @@ This is a production-ready AI agent application built with:
 - Example: `logger.info("chat_request_received", session_id=session.id, message_count=len(messages))`
 
 ### Retry Rules
-- **Always use tenacity library** for retry logic
-- Configure with exponential backoff
-- Example: `@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))`
+- **LLM calls never get their own retries.** Call `llm_service.call(...)`, or use `ResilientChatModel` where a library needs a chat model; `ResilientInvoker` is the single retry layer (classified errors, full-jitter backoff, retry budget, circuit breakers). Wrapping an LLM call in tenacity, or turning SDK retries back on, multiplies attempts during an outage (see `docs/reliability.md`)
+- For other external I/O, use **tenacity** with exponential backoff and jitter, retry only transient errors, and cap the attempts
+- Example: `@retry(stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=0.5, max=8), retry=retry_if_exception_type(httpx.TransportError))`
 
 ### Output Rules
 - **Always enable rich library** for formatted console outputs
@@ -184,13 +184,27 @@ This is a production-ready AI agent application built with:
 2. All LLM operations must have Langfuse tracing
 3. All async operations must have proper error handling
 4. All logs must follow structured logging format with lowercase_underscore event names
-5. All retries must use tenacity library
+5. LLM calls go through `llm_service` / `ResilientChatModel` (never extra retries); other retries use tenacity
 6. All console outputs should use rich formatting
 7. All caching should only store successful responses
 8. All imports must be at the top of files
 9. All database operations must be async
 10. All endpoints must have proper type hints and Pydantic models
 11. All code must pass `make typecheck` (pyright standard mode)
+
+## Kit Layers
+
+The kit adds layers on top of the template; each has a doc in `docs/` and offline tests in `tests/`:
+RAG (`app/services/rag/`), guardrails (`app/services/guardrails/`), reliability (`app/services/reliability/`),
+MCP and A2A (`app/services/mcp/`, `app/services/a2a/`), agents (`app/services/agents/`), evaluation
+(`app/services/evaluation/`), cost guard (`app/services/cost_guard.py`). `docs/ROADMAP.md` lists them.
+
+- A new tool with side effects must be added to `GUARD_APPROVAL_TOOLS` in the deployment config, and its docs must say so
+- Tests must run offline: script LLM replies (`tests/fakes.py`, or monkeypatch `llm_service.call`) and use `HashingEmbedder` / `InMemoryVectorStore`; integration tests skip unless their service is configured (`RAG_TEST_PG_URL`)
+- Features that need a model download, a paid API, or change behaviour are off by default behind a setting
+- Never return `str(exception)` to API clients; log it and return a generic message
+- Label metrics with bounded values (route templates, model names), never raw paths or ids
+- Record where ported code came from (lab, repo, commit) in the layer's doc
 
 ## Common Pitfalls to Avoid
 

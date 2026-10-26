@@ -1,0 +1,64 @@
+# promtool unit tests for alerts.yml:
+#   docker run --rm -v "$PWD/prometheus:/p" --entrypoint promtool prom/prometheus test rules /p/alerts_test.yml
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+
+tests:
+  # 20% of calls fail for 1h: fast burn (> 14.4%) pages within the hour.
+  - interval: 1m
+    input_series:
+      - series: 'llm_calls_total{outcome="success"}'
+        values: '0+80x120'
+      - series: 'llm_calls_total{outcome="failed"}'
+        values: '0+20x120'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: LLMErrorBudgetFastBurn
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: LLM calls are failing fast enough to exhaust the monthly error budget within days
+              description: Check llm_breaker_state and llm_attempts_total by model to see which provider is down.
+
+  # 0.5% failures is inside the 1% budget: no page, no ticket.
+  - interval: 1m
+    input_series:
+      - series: 'llm_calls_total{outcome="success"}'
+        values: '0+199x400'
+      - series: 'llm_calls_total{outcome="failed"}'
+        values: '0+1x400'
+    alert_rule_test:
+      - eval_time: 6h
+        alertname: LLMErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: LLMErrorBudgetSlowBurn
+        exp_alerts: []
+
+  # Client errors are our bug and must not burn the provider SLO.
+  - interval: 1m
+    input_series:
+      - series: 'llm_calls_total{outcome="success"}'
+        values: '0+50x120'
+      - series: 'llm_calls_total{outcome="client_error"}'
+        values: '0+50x120'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: LLMErrorBudgetFastBurn
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'llm_breaker_state{model="gpt-5.6-luna"}'
+        values: '2x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: LLMCircuitBreakerOpen
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              model: gpt-5.6-luna
+            exp_annotations:
+              summary: "Circuit breaker for gpt-5.6-luna has been open for 5 minutes"

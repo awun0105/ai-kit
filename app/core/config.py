@@ -163,11 +163,108 @@ class Settings:
         self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "3"))
         self.LLM_TOTAL_TIMEOUT = int(os.getenv("LLM_TOTAL_TIMEOUT", "60"))
+        # Reliability (see docs/reliability.md). MAX_LLM_CALL_RETRIES is the attempt count per model.
+        self.LLM_ATTEMPT_TIMEOUT = float(os.getenv("LLM_ATTEMPT_TIMEOUT", "30"))
+        self.LLM_RETRY_BASE_S = float(os.getenv("LLM_RETRY_BASE_S", "0.5"))
+        self.LLM_RETRY_CAP_S = float(os.getenv("LLM_RETRY_CAP_S", "8"))
+        self.LLM_RETRY_BUDGET_RATIO = float(os.getenv("LLM_RETRY_BUDGET_RATIO", "0.1"))
+        self.LLM_MAX_RETRY_AFTER_S = float(os.getenv("LLM_MAX_RETRY_AFTER_S", "10"))
+        self.LLM_QUOTA_COOLDOWN_S = float(os.getenv("LLM_QUOTA_COOLDOWN_S", "300"))
+        self.LLM_BREAKER_WINDOW = int(os.getenv("LLM_BREAKER_WINDOW", "20"))
+        self.LLM_BREAKER_MIN_CALLS = int(os.getenv("LLM_BREAKER_MIN_CALLS", "10"))
+        self.LLM_BREAKER_FAILURE_RATE = float(os.getenv("LLM_BREAKER_FAILURE_RATE", "0.5"))
+        self.LLM_BREAKER_SLOW_CALL_S = float(os.getenv("LLM_BREAKER_SLOW_CALL_S", "20"))
+        self.LLM_BREAKER_OPEN_S = float(os.getenv("LLM_BREAKER_OPEN_S", "30"))
+        self.LLM_BREAKER_HALF_OPEN_PROBES = int(os.getenv("LLM_BREAKER_HALF_OPEN_PROBES", "2"))
 
         # Long term memory Configuration
         self.LONG_TERM_MEMORY_MODEL = os.getenv("LONG_TERM_MEMORY_MODEL", "gpt-5-nano")
         self.LONG_TERM_MEMORY_EMBEDDER_MODEL = os.getenv("LONG_TERM_MEMORY_EMBEDDER_MODEL", "text-embedding-3-small")
         self.LONG_TERM_MEMORY_COLLECTION_NAME = os.getenv("LONG_TERM_MEMORY_COLLECTION_NAME", "longterm_memory")
+        # RAG Configuration (the knowledge_search tool is registered only when enabled)
+        self.RAG_ENABLED = os.getenv("RAG_ENABLED", "false").lower() in ("true", "1", "t", "yes")
+        self.RAG_VECTOR_STORE = os.getenv("RAG_VECTOR_STORE", "pgvector")  # "pgvector" or "memory"
+        self.RAG_TABLE = os.getenv("RAG_TABLE", "rag_chunks")
+        self.RAG_EMBEDDING_PROVIDER = os.getenv("RAG_EMBEDDING_PROVIDER", "openai")  # "openai" or "hashing"
+        self.RAG_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "text-embedding-3-small")
+        self.RAG_EMBEDDING_DIM = int(os.getenv("RAG_EMBEDDING_DIM", "1536"))
+        self.RAG_EMBEDDING_BASE_URL = os.getenv("RAG_EMBEDDING_BASE_URL", "")
+        self.RAG_EMBEDDING_API_KEY = os.getenv("RAG_EMBEDDING_API_KEY", self.OPENAI_API_KEY)
+        self.RAG_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "500"))
+        self.RAG_CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "50"))
+        self.RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+        self.RAG_SCORE_THRESHOLD = float(os.getenv("RAG_SCORE_THRESHOLD", "0.3"))
+        self.RAG_LEXICAL_TOKENIZER = os.getenv("RAG_LEXICAL_TOKENIZER", "auto")  # "auto", "vi" or "simple"
+        # Empty disables reranking. Otherwise a rerankers model name, e.g. "flashrank" or "BAAI/bge-reranker-v2-m3"
+        self.RAG_RERANKER = os.getenv("RAG_RERANKER", "")
+        self.RAG_RERANKER_TYPE = os.getenv(
+            "RAG_RERANKER_TYPE", ""
+        )  # e.g. "cross-encoder"; empty lets rerankers infer it
+        self.RAG_RERANK_CANDIDATES = int(os.getenv("RAG_RERANK_CANDIDATES", "20"))
+
+        # MCP (see docs/tools.md). A JSON file in the standard {"mcpServers": {...}} format.
+        self.MCP_CONFIG_FILE = os.getenv("MCP_CONFIG_FILE", "")
+        self.MCP_TOOL_ALLOWLIST = parse_list_from_env("MCP_TOOL_ALLOWLIST")  # empty exposes every discovered tool
+        self.MCP_SERVER_TOKEN = os.getenv("MCP_SERVER_TOKEN", "")  # bearer token for the kit's own HTTP MCP server
+
+        # A2A (see docs/tools.md); needs `uv sync --extra a2a`
+        self.A2A_ENABLED = os.getenv("A2A_ENABLED", "false").lower() in ("true", "1", "t", "yes")
+        self.A2A_SERVER_TOKEN = os.getenv("A2A_SERVER_TOKEN", "")
+        self.A2A_PUBLIC_URL = os.getenv("A2A_PUBLIC_URL", "http://localhost:8000/a2a")
+        self.A2A_AGENT_DESCRIPTION = os.getenv(
+            "A2A_AGENT_DESCRIPTION", "Answers questions using the organisation's knowledge base and tools."
+        )
+        # Remote agents the model may delegate to, as name=url pairs; tokens in A2A_REMOTE_TOKEN_<NAME>
+        self.A2A_REMOTE_AGENTS = parse_list_from_env("A2A_REMOTE_AGENTS")
+
+        # Deep research team (see docs/agents.md); needs `uv sync --extra deep`
+        self.DEEP_RESEARCH_ENABLED = os.getenv("DEEP_RESEARCH_ENABLED", "false").lower() in ("true", "1", "t", "yes")
+        self.DEEP_RESEARCH_MAX_MODEL_CALLS = int(os.getenv("DEEP_RESEARCH_MAX_MODEL_CALLS", "40"))
+        self.DEEP_RESEARCH_MAX_TOOL_CALLS = int(os.getenv("DEEP_RESEARCH_MAX_TOOL_CALLS", "80"))
+
+        # Cost guard (see docs/deployment.md): monthly USD budget per user; 0 disables it.
+        self.COST_MONTHLY_BUDGET_USD = float(os.getenv("COST_MONTHLY_BUDGET_USD", "0"))
+        # {"model name": [input USD per 1M tokens, output USD per 1M tokens]}, from your provider's price list
+        self.COST_PRICES_JSON = os.getenv("COST_PRICES_JSON", "")
+        self.COST_DEFAULT_INPUT_PER_1M = float(os.getenv("COST_DEFAULT_INPUT_PER_1M", "0"))
+        self.COST_DEFAULT_OUTPUT_PER_1M = float(os.getenv("COST_DEFAULT_OUTPUT_PER_1M", "0"))
+
+        # Answer cache (see docs/reliability.md); needs RAG_ENABLED because answers are keyed to their sources
+        self.ANSWER_CACHE_ENABLED = os.getenv("ANSWER_CACHE_ENABLED", "false").lower() in ("true", "1", "t", "yes")
+        self.ANSWER_CACHE_STORE = os.getenv("ANSWER_CACHE_STORE", "pgvector")  # "pgvector" or "memory"
+        self.ANSWER_CACHE_TABLE = os.getenv("ANSWER_CACHE_TABLE", "rag_answer_cache")
+        self.ANSWER_CACHE_THRESHOLD = float(os.getenv("ANSWER_CACHE_THRESHOLD", "0.92"))
+        self.ANSWER_CACHE_TTL_S = float(os.getenv("ANSWER_CACHE_TTL_S", "3600"))
+        self.ANSWER_CACHE_MAX_STALE_S = float(os.getenv("ANSWER_CACHE_MAX_STALE_S", "86400"))
+        self.ANSWER_CACHE_VERSION = os.getenv("ANSWER_CACHE_VERSION", "1")  # bump to discard every cached answer
+
+        # Guardrails Configuration (deterministic rails are on by default; see docs/guardrails.md)
+        self.GUARD_ENABLED = os.getenv("GUARD_ENABLED", "true").lower() in ("true", "1", "t", "yes")
+        self.GUARD_BLOCK_INJECTION = os.getenv("GUARD_BLOCK_INJECTION", "true").lower() in ("true", "1", "t", "yes")
+        self.GUARD_INPUT_PII_ACTION = os.getenv("GUARD_INPUT_PII_ACTION", "redact")  # "redact", "block" or "allow"
+        self.GUARD_OUTPUT_REDACTION = os.getenv("GUARD_OUTPUT_REDACTION", "true").lower() in ("true", "1", "t", "yes")
+        # Values or "@domain" suffixes never redacted, e.g. a public support address
+        self.GUARD_PII_ALLOWLIST = parse_list_from_env("GUARD_PII_ALLOWLIST")
+        # Application secrets that must never reach the model or the user, e.g. an internal hostname
+        self.GUARD_DENYLIST = parse_list_from_env("GUARD_DENYLIST")
+        # Tools that pause for human approval before running
+        self.GUARD_APPROVAL_TOOLS = parse_list_from_env("GUARD_APPROVAL_TOOLS")
+        # When set, tool arguments may only contain https URLs on these hosts (and their subdomains)
+        self.GUARD_EGRESS_ALLOWLIST = parse_list_from_env("GUARD_EGRESS_ALLOWLIST")
+        self.GUARD_SCREEN_TOOL_OUTPUT = os.getenv("GUARD_SCREEN_TOOL_OUTPUT", "true").lower() in (
+            "true",
+            "1",
+            "t",
+            "yes",
+        )
+        self.GUARD_LLM_RAIL_ENABLED = os.getenv("GUARD_LLM_RAIL_ENABLED", "false").lower() in ("true", "1", "t", "yes")
+        self.GUARD_LLM_RAIL_POLICY = os.getenv(
+            "GUARD_LLM_RAIL_POLICY", "A general-purpose assistant. Any lawful topic is in scope."
+        )
+        self.GUARD_LLM_RAIL_MODEL = os.getenv("GUARD_LLM_RAIL_MODEL", "")  # empty uses the default model
+        self.GUARD_LLM_RAIL_FAIL_MODE = os.getenv("GUARD_LLM_RAIL_FAIL_MODE", "open")  # "open" or "closed"
+        self.GUARD_REFUSAL_MESSAGE = os.getenv("GUARD_REFUSAL_MESSAGE", "Sorry, I can't help with that request.")
+
         # JWT Configuration
         self.JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
         self.JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")

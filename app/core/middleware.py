@@ -1,6 +1,7 @@
 """Custom middleware for tracking metrics and other cross-cutting concerns."""
 
 import json
+import re
 import time
 import tracemalloc
 from typing import (
@@ -46,6 +47,25 @@ else:
         PYINSTRUMENT_AVAILABLE = False
 
 
+def route_template(request: Request) -> str:
+    """Return the matched route's template with its router prefix, e.g. ``/api/v1/auth/session/{session_id}``.
+
+    FastAPI's lazily included routers keep route paths relative to the router, so the
+    static prefix is recovered from the part of the raw path in front of the match.
+    """
+    route = request.scope.get("route")
+    template = getattr(route, "path_format", None) or getattr(route, "path", None)
+    regex = getattr(route, "path_regex", None)
+    if not template:
+        return "unmatched"
+    path = request.scope.get("path", "")
+    if regex is not None and not path.endswith(template):
+        tail = re.search(regex.pattern.lstrip("^").rstrip("$") + "$", path)
+        if tail:
+            return path[: tail.start()] + template
+    return path[: len(path) - len(template)] + template if path.endswith(template) else template
+
+
 class MetricsMiddleware(BaseHTTPMiddleware):
     """Middleware for tracking HTTP request metrics."""
 
@@ -71,10 +91,12 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         finally:
             duration = time.time() - start_time
 
-            # Record metrics
-            http_requests_total.labels(method=request.method, endpoint=request.url.path, status=status_code).inc()
+            # Label by route template (/session/{session_id}), not the raw path: one label value
+            # per session id would grow Prometheus memory without bound.
+            endpoint = route_template(request)
+            http_requests_total.labels(method=request.method, endpoint=endpoint, status=status_code).inc()
 
-            http_request_duration_seconds.labels(method=request.method, endpoint=request.url.path).observe(duration)
+            http_request_duration_seconds.labels(method=request.method, endpoint=endpoint).observe(duration)
 
         return response
 

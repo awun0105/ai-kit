@@ -2,12 +2,13 @@
 
 ## Overview
 
-The LLM service (`app/services/llm/`) handles all language model calls with automatic retries, circular model fallback, and a total timeout budget. Your agent code calls `llm_service.call(messages)` — the service handles everything else.
+The LLM service (`app/services/llm/`) handles all language model calls through one resilient path: a fallback ladder over the registry models with per-model circuit breakers, classified errors, jittered retries under a retry budget, and a total timeout budget. Your agent code calls `llm_service.call(messages)` (or uses `ResilientChatModel`, see [agents](agents.md)) and the service handles everything else. The full reliability design is in [reliability.md](reliability.md).
 
 The package is split into two modules:
 
 - `app/services/llm/registry.py` — `LLMRegistry`: defines available models
-- `app/services/llm/service.py` — `LLMService`: call logic, retries, fallback, structured output
+- `app/services/llm/service.py` — `LLMService`: ladder construction, structured output, tool binding
+- `app/services/reliability/` — `ResilientInvoker`: error classification, retries, breakers, cooldowns
 
 ## Model registry
 
@@ -37,38 +38,41 @@ To add or change models, edit `LLMRegistry.LLM_CONFIGS` in `app/services/llm/reg
 ```mermaid
 flowchart TD
     Call["llm_service.call(messages)"]
-    TotalTimeout["asyncio.wait_for\nLLM_TOTAL_TIMEOUT seconds"]
-    Try["Try current model"]
-    Retry{"Retryable error?\n(rate limit, timeout, API error)"}
-    MaxRetries{"MAX_LLM_CALL_RETRIES\nreached?"}
-    NextModel{"More models\nto try?"}
-    Backoff["Exponential backoff\n2s → 4s → 8s"]
-    Switch["Switch to next model\n(circular)"]
+    Ladder["Ladder: requested or default model first,\nthen the rest of the registry in order"]
+    Skip{"Breaker open or\nmodel cooling down?"}
+    Try["Attempt (LLM_ATTEMPT_TIMEOUT)"]
+    Kind{"Error kind"}
+    Retry{"Attempts left and\nretry budget?"}
+    Wait["Full-jitter backoff\n(retry-after is a floor)"]
+    Next["Next model"]
+    Raise["Raise the client error"]
+    Fail["AllProvidersFailedError"]
     Success["Return response"]
-    Fail["Raise RuntimeError"]
 
-    Call --> TotalTimeout --> Try
-    Try --> Retry
-    Retry -->|yes| Backoff --> MaxRetries
-    MaxRetries -->|no| Try
-    MaxRetries -->|yes| NextModel
-    Retry -->|no| Fail
-    NextModel -->|yes| Switch --> Try
-    NextModel -->|no| Fail
+    Call --> Ladder --> Skip
+    Skip -->|yes| Next
+    Skip -->|no| Try
     Try -->|success| Success
+    Try --> Kind
+    Kind -->|400/401/403/404/422| Raise
+    Kind -->|quota exhausted, long rate limit| Next
+    Kind -->|5xx, 529, timeout, short rate limit| Retry
+    Retry -->|yes| Wait --> Try
+    Retry -->|no| Next
+    Next -->|more models| Skip
+    Next -->|none left| Fail
 ```
 
-**Retry config** (per model):
+- **One retry layer.** SDK retries are off (`max_retries=0` in the registry); `MAX_LLM_CALL_RETRIES`
+  is the number of attempts per model.
+- **Classified errors.** Client errors are raised at once and never fail over or open a breaker;
+  quota exhaustion cools the model down; overload, server errors and timeouts are retried and
+  count toward the model's breaker. This works for any provider whose exceptions carry an HTTP status.
+- **No global switching.** Every call starts from the preferred model again. A model that keeps
+  failing has an open breaker, so skipping it costs nothing.
+- **Total timeout**: `LLM_TOTAL_TIMEOUT` (default 60 s) caps the whole ladder.
 
-- Max attempts: `MAX_LLM_CALL_RETRIES` (default: 3)
-- Wait: exponential backoff, 2s min, 10s max
-- Retries on: `openai`'s `RateLimitError`, `APITimeoutError`, `APIError`
-
-  These are OpenAI-specific exception types. A non-OpenAI registry entry (e.g. `anthropic:claude-opus-4-6`) still gets circular fallback to the next model on any exception, but not the per-model exponential-backoff retry until that provider's error types are added to this tuple too.
-
-**Total timeout**: `LLM_TOTAL_TIMEOUT` seconds (default: 60s) caps the entire loop. Without this, worst case is `retries × models × max_wait` — potentially 2+ minutes.
-
-**Fallback order**: circular through `LLMRegistry.LLMS`. After the last model, wraps back to the first and stops after one full cycle.
+Settings and the reasoning behind each rule: [reliability.md](reliability.md).
 
 ## Tools
 
@@ -78,7 +82,7 @@ Tools are bound to the LLM at startup:
 llm_service.bind_tools(tools)
 ```
 
-When a model is switched during fallback, the tools are re-bound to the new model automatically.
+Tools are bound to every registry model that supports tool calling. Models marked `"supports_tools": False` in `LLM_CONFIGS` are skipped for tool-bound calls.
 
 ## Structured output
 
@@ -95,7 +99,7 @@ result: MySchema = await llm_service.call(
 )
 ```
 
-The service chains `.with_structured_output(schema)` on the resolved model and re-wraps it on every fallback attempt, so retries and model switching work transparently.
+The service chains `.with_structured_output(schema)` on each model of the ladder, so retries and failover work the same way.
 
 ## Adding a new model
 

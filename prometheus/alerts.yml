@@ -1,0 +1,61 @@
+# Multi-window, multi-burn-rate alerts for the LLM availability SLO
+# (Google SRE Workbook, "Alerting on SLOs"; D25 Reliability lab, part E).
+#
+# SLI: share of logical LLM calls that got an answer after retries and failover.
+#      Client errors (bad requests, auth) are excluded: they are our bug, not downtime.
+# SLO: 99% over 30 days  ->  error budget = 1%.
+#
+# A burn rate of 14.4 spends 2% of the monthly budget in 1 hour: page.
+# A burn rate of 6 spends 5% of it in 6 hours: page.
+# A burn rate of 1 over 3 days means the budget will run out by month end: ticket.
+# The short window (1/12 of the long one) makes the alert resolve quickly once fixed.
+
+groups:
+  - name: llm-slo-recording
+    rules:
+      - record: llm:call_error_ratio:rate5m
+        expr: |
+          sum(rate(llm_calls_total{outcome="failed"}[5m]))
+          / clamp_min(sum(rate(llm_calls_total{outcome=~"success|failed"}[5m])), 1e-9)
+      - record: llm:call_error_ratio:rate30m
+        expr: |
+          sum(rate(llm_calls_total{outcome="failed"}[30m]))
+          / clamp_min(sum(rate(llm_calls_total{outcome=~"success|failed"}[30m])), 1e-9)
+      - record: llm:call_error_ratio:rate1h
+        expr: |
+          sum(rate(llm_calls_total{outcome="failed"}[1h]))
+          / clamp_min(sum(rate(llm_calls_total{outcome=~"success|failed"}[1h])), 1e-9)
+      - record: llm:call_error_ratio:rate6h
+        expr: |
+          sum(rate(llm_calls_total{outcome="failed"}[6h]))
+          / clamp_min(sum(rate(llm_calls_total{outcome=~"success|failed"}[6h])), 1e-9)
+      - record: llm:call_error_ratio:rate3d
+        expr: |
+          sum(rate(llm_calls_total{outcome="failed"}[3d]))
+          / clamp_min(sum(rate(llm_calls_total{outcome=~"success|failed"}[3d])), 1e-9)
+
+  - name: llm-slo-alerts
+    rules:
+      - alert: LLMErrorBudgetFastBurn
+        expr: |
+          (llm:call_error_ratio:rate1h > 14.4 * 0.01 and llm:call_error_ratio:rate5m > 14.4 * 0.01)
+          or
+          (llm:call_error_ratio:rate6h > 6 * 0.01 and llm:call_error_ratio:rate30m > 6 * 0.01)
+        labels:
+          severity: page
+        annotations:
+          summary: LLM calls are failing fast enough to exhaust the monthly error budget within days
+          description: Check llm_breaker_state and llm_attempts_total by model to see which provider is down.
+      - alert: LLMErrorBudgetSlowBurn
+        expr: llm:call_error_ratio:rate3d > 1 * 0.01 and llm:call_error_ratio:rate6h > 1 * 0.01
+        labels:
+          severity: ticket
+        annotations:
+          summary: LLM error rate is above the SLO; the monthly error budget will run out
+      - alert: LLMCircuitBreakerOpen
+        expr: max by (model) (llm_breaker_state) == 2
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Circuit breaker for {{ $labels.model }} has been open for 5 minutes"

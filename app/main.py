@@ -31,6 +31,7 @@ from app.core.middleware import (
 )
 from app.core.observability import langfuse_init
 from app.services.database import database_service
+from app.services.mcp import build_toolkit_from_settings
 from app.services.memory import memory_service
 
 # Load environment variables
@@ -69,9 +70,49 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("memory_service_pre_warm_failed", error=str(e))
 
+    # Let the model delegate to remote A2A agents (A2A_REMOTE_AGENTS).
+    if settings.A2A_REMOTE_AGENTS:
+        try:
+            from app.services.a2a.client import (  # optional "a2a" extra
+                build_remote_agent_tool,
+                parse_remote_agents,
+            )
+
+            agent.register_tools([build_remote_agent_tool(parse_remote_agents(settings.A2A_REMOTE_AGENTS))])
+        except Exception as e:
+            logger.exception("a2a_remote_tool_failed", error=str(e))
+
+    # Load tools from external MCP servers (MCP_CONFIG_FILE). A broken server must
+    # not take the API down: the agent starts with its built-in tools instead.
+    mcp_toolkit = None
+    try:
+        mcp_toolkit = build_toolkit_from_settings()
+        if mcp_toolkit is not None:
+            agent.register_tools(await mcp_toolkit.start())
+    except Exception as e:
+        logger.exception("mcp_toolkit_start_failed", error=str(e))
+
+    # Give the agent a research team that can use every tool registered so far.
+    if settings.DEEP_RESEARCH_ENABLED:
+        try:
+            from app.services.agents.research import build_deep_research_tool  # optional "deep" extra
+
+            sources = [t for name, t in agent.tools_by_name.items() if name not in ("ask_human", "deep_research")]
+            agent.register_tools(
+                [
+                    build_deep_research_tool(
+                        sources, settings.DEEP_RESEARCH_MAX_MODEL_CALLS, settings.DEEP_RESEARCH_MAX_TOOL_CALLS
+                    )
+                ]
+            )
+        except Exception as e:
+            logger.exception("deep_research_tool_failed", error=str(e))
+
     yield
 
     # Cleanup on shutdown
+    if mcp_toolkit is not None:
+        await mcp_toolkit.stop()
     await cache_service.close()
     if agent._connection_pool:
         await agent._connection_pool.close()
@@ -151,6 +192,35 @@ app.add_middleware(
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Serve the agent to other agents over A2A at /a2a (card at /a2a/.well-known/agent-card.json).
+if settings.A2A_ENABLED:
+    from app.services.a2a.server import (  # optional "a2a" extra
+        agent_ask,
+        build_a2a_app,
+        build_agent_card,
+    )
+
+    app.mount(
+        "/a2a",
+        build_a2a_app(
+            build_agent_card(
+                name=settings.PROJECT_NAME,
+                description=settings.A2A_AGENT_DESCRIPTION,
+                url=settings.A2A_PUBLIC_URL,
+                skills=[
+                    {
+                        "id": "chat",
+                        "name": "Answer questions",
+                        "description": settings.A2A_AGENT_DESCRIPTION,
+                        "tags": ["qa"],
+                    }
+                ],
+            ),
+            agent_ask(agent),
+            token=settings.A2A_SERVER_TOKEN,
+        ),
+    )
 
 
 @app.get("/")

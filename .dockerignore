@@ -62,3 +62,5 @@ schema.sql
 
 # Reports
 evals/reports/
+.flashrank_cache/
+reports/

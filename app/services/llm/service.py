@@ -1,12 +1,21 @@
-"""LLM service with retries, circular fallback, and optional structured output."""
+"""LLM service: one resilient call path over the model registry, with optional structured output.
+
+Every call walks a fallback ladder that starts at the requested (or default)
+model and continues through the registry order. ``ResilientInvoker`` handles
+breakers, cooldowns, jittered retries under a retry budget and failover; see
+``docs/reliability.md``. Unlike the original circular fallback, a failure never
+switches the process-wide default: the next call starts from the preferred
+model again, and an open breaker makes skipping it cheap.
+"""
 
 import asyncio
-import logging
 from typing import (
     Any,
+    Awaitable,
     Callable,
     List,
     Optional,
+    Sequence,
     Type,
     TypeVar,
     Union,
@@ -15,67 +24,77 @@ from typing import (
 
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import BaseMessage
-from openai import (
-    APIError,
-    APITimeoutError,
-    RateLimitError,
-)
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
-from tenacity import (
-    before_sleep_log,
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.core.metrics import llm_calls_total
 from app.services.llm.registry import LLMRegistry
+from app.services.reliability import (
+    AllProvidersFailedError,
+    FullJitterBackoff,
+    ResilientInvoker,
+    RetryBudget,
+    SlidingWindowBreaker,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
 
+def build_invoker_from_settings() -> ResilientInvoker:
+    """Assemble the reliability policy from the LLM_* settings."""
+    return ResilientInvoker(
+        max_attempts=settings.MAX_LLM_CALL_RETRIES,
+        attempt_timeout_s=settings.LLM_ATTEMPT_TIMEOUT,
+        max_retry_after_s=settings.LLM_MAX_RETRY_AFTER_S,
+        quota_cooldown_s=settings.LLM_QUOTA_COOLDOWN_S,
+        backoff=FullJitterBackoff(settings.LLM_RETRY_BASE_S, settings.LLM_RETRY_CAP_S),
+        budget=RetryBudget(ratio=settings.LLM_RETRY_BUDGET_RATIO),
+        breaker_factory=lambda name: SlidingWindowBreaker(
+            name=name,
+            window_size=settings.LLM_BREAKER_WINDOW,
+            min_calls=settings.LLM_BREAKER_MIN_CALLS,
+            failure_rate_threshold=settings.LLM_BREAKER_FAILURE_RATE,
+            slow_call_s=settings.LLM_BREAKER_SLOW_CALL_S,
+            open_duration_s=settings.LLM_BREAKER_OPEN_S,
+            half_open_max_probes=settings.LLM_BREAKER_HALF_OPEN_PROBES,
+        ),
+    )
+
+
 class LLMService:
-    """Service for managing LLM calls with retries and circular fallback.
+    """Calls models from the registry through one resilient ladder.
 
-    Two distinct execution paths:
+    Two kinds of call:
 
-    - **Default path** (no model_name / response_format / model_kwargs): uses
-      ``self._llm`` which is the tool-bound agent model. Circular fallback
-      updates ``self._llm`` so tool bindings are preserved across retries.
-
-    - **One-off path** (any override provided): resolves a fresh, local
-      ``Runnable`` for the call without ever touching ``self._llm``, so
-      concurrent default-path calls are never affected.
+    - **Default path** (no model_name / response_format / model_kwargs): the
+      tool-bound agent models. Models without tool support are skipped.
+    - **One-off path** (any override provided): a fresh runnable per model,
+      optionally with structured output, never touching the bound instances.
     """
 
-    def __init__(self):
-        """Initialize the LLM service with the configured default model."""
-        self._llm: Any = None  # BaseChatModel pre-bind_tools, Runnable after
-        self._current_model_index: int = 0
+    def __init__(self, invoker: Optional[ResilientInvoker] = None):
+        """Initialize the service with the configured default model."""
+        self.invoker = invoker or build_invoker_from_settings()
         self._bound_tools: List = []
+        self._bound: dict[str, Any] = {}
 
         all_names = LLMRegistry.get_all_names()
-        try:
-            self._current_model_index = all_names.index(settings.DEFAULT_LLM_MODEL)
-            self._llm = LLMRegistry.get(settings.DEFAULT_LLM_MODEL)
-            logger.info(
-                "llm_service_initialized",
-                default_model=settings.DEFAULT_LLM_MODEL,
-                model_index=self._current_model_index,
-                total_models=len(all_names),
-                environment=settings.ENVIRONMENT.value,
-            )
-        except Exception as e:
-            self._current_model_index = 0
-            self._llm = LLMRegistry.LLMS[0]["llm"]
+        if settings.DEFAULT_LLM_MODEL in all_names:
+            self._primary = settings.DEFAULT_LLM_MODEL
+        else:
+            self._primary = all_names[0]
             logger.warning(
-                "default_model_not_found_using_first",
-                requested=settings.DEFAULT_LLM_MODEL,
-                using=all_names[0] if all_names else "none",
-                error=str(e),
+                "default_model_not_found_using_first", requested=settings.DEFAULT_LLM_MODEL, using=self._primary
             )
+        self._llm: Any = LLMRegistry.get(self._primary)
+        logger.info(
+            "llm_service_initialized",
+            default_model=self._primary,
+            total_models=len(all_names),
+            environment=settings.ENVIRONMENT.value,
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -107,49 +126,56 @@ class LLMService:
         response_format: Optional[Type[BaseModel]] = None,
         **model_kwargs: Any,
     ) -> Union[BaseMessage, BaseModel]:
-        """Call the LLM with retries and circular fallback.
+        """Call the LLM through the fallback ladder.
 
         Args:
             messages: Conversation messages to send.
-            model_name: Override the model. ``None`` uses the current default.
-            response_format: Pydantic schema for structured output. When
-                provided the call chains ``.with_structured_output(schema)``
-                and returns a validated instance of that schema instead of a
-                raw ``BaseMessage``.
+            model_name: Start the ladder at this model. ``None`` uses the default.
+            response_format: Pydantic schema for structured output; the call
+                returns a validated instance instead of a ``BaseMessage``.
             **model_kwargs: Extra kwargs forwarded to ``LLMRegistry.get`` when
-                constructing a one-off model instance (e.g. ``temperature``,
-                ``max_tokens``, ``reasoning``).
+                building one-off model instances (e.g. ``temperature``).
 
         Returns:
-            ``BaseMessage`` when ``response_format`` is ``None``, otherwise a
-            validated instance of ``response_format``.
+            ``BaseMessage`` when ``response_format`` is ``None``, otherwise an
+            instance of ``response_format``.
 
         Raises:
-            RuntimeError: When all models fail after retries or the total
-                timeout budget is exceeded.
+            ValueError: ``model_name`` is not in the registry.
+            RuntimeError: No model answered, or the total timeout budget ran out.
+            Exception: A client error (bad request, auth) from the provider,
+                re-raised unchanged because no other model would accept it either.
         """
+        all_names = LLMRegistry.get_all_names()
+        if model_name and model_name not in all_names:
+            logger.error("requested_model_not_found", model_name=model_name)
+            raise ValueError(f"model '{model_name}' not found in registry. available models: {', '.join(all_names)}")
         try:
-            return await asyncio.wait_for(
-                self._call_with_fallback(messages, model_name, response_format, model_kwargs),
+            result = await asyncio.wait_for(
+                self.invoker.invoke(self._ladder(messages, model_name, response_format, model_kwargs)),
                 timeout=settings.LLM_TOTAL_TIMEOUT,
             )
         except asyncio.TimeoutError:
-            logger.exception(
-                "llm_total_timeout_exceeded",
-                timeout_seconds=settings.LLM_TOTAL_TIMEOUT,
-            )
+            llm_calls_total.labels(outcome="failed").inc()
+            logger.exception("llm_total_timeout_exceeded", timeout_seconds=settings.LLM_TOTAL_TIMEOUT)
             raise RuntimeError(f"llm call timed out after {settings.LLM_TOTAL_TIMEOUT}s total budget")
+        except AllProvidersFailedError:
+            llm_calls_total.labels(outcome="failed").inc()
+            raise
+        except Exception:
+            # Client errors and programming errors are our fault, not the provider's;
+            # they are excluded from the availability SLI.
+            llm_calls_total.labels(outcome="client_error").inc()
+            raise
+        llm_calls_total.labels(outcome="success").inc()
+        return result
 
     def get_llm(self) -> Any:
-        """Return the current tool-bound default LLM instance.
-
-        Returns:
-            Current ``BaseChatModel`` instance or ``None`` if not initialised.
-        """
+        """Return the tool-bound default model instance (used for metric labels)."""
         return self._llm
 
     def bind_tools(self, tools: List) -> "LLMService":
-        """Bind tools to the default LLM instance.
+        """Bind tools to every registry model that supports tool calling.
 
         Args:
             tools: List of tools to bind.
@@ -157,208 +183,92 @@ class LLMService:
         Returns:
             Self for method chaining.
         """
-        if self._llm:
-            self._bound_tools = tools
-            self._llm = self._llm.bind_tools(tools)
-            logger.debug("tools_bound_to_llm", tool_count=len(tools))
+        self._bound_tools = tools
+        self._bound = {
+            entry["name"]: entry["llm"].bind_tools(tools)
+            for entry in LLMRegistry.LLMS
+            if LLMRegistry.supports_tools(entry["name"])
+        }
+        self._llm = self._bound.get(self._primary, self._llm)
+        logger.debug("tools_bound_to_llm", tool_count=len(tools), models=list(self._bound))
         return self
+
+    async def ainvoke_with_tools(
+        self,
+        messages: LanguageModelInput,
+        tools: Sequence[Any] = (),
+        tool_kwargs: Optional[dict[str, Any]] = None,
+        model_name: Optional[str] = None,
+        config: Optional[RunnableConfig] = None,
+    ) -> BaseMessage:
+        """Call the ladder with an arbitrary tool set (used by ``ResilientChatModel``).
+
+        Each rung binds ``tools`` to its registry model; models without tool
+        support are skipped when tools are given. ``config`` (callbacks, tags)
+        is passed to the provider call so traces nest under the caller.
+        """
+        names = LLMRegistry.get_all_names()
+        start = names.index(model_name or self._primary)
+        rungs: list[tuple[str, Callable[[], Awaitable[Any]]]] = []
+        for name in names[start:] + names[:start]:
+            if tools and not LLMRegistry.supports_tools(name):
+                continue
+
+            def attempt(name: str = name) -> Awaitable[Any]:
+                model: Any = LLMRegistry.get(name)
+                if tools:
+                    model = model.bind_tools(list(tools), **(tool_kwargs or {}))
+                return model.ainvoke(messages, config=config)
+
+            rungs.append((name, attempt))
+        try:
+            result = await asyncio.wait_for(self.invoker.invoke(rungs), timeout=settings.LLM_TOTAL_TIMEOUT)
+        except asyncio.TimeoutError:
+            llm_calls_total.labels(outcome="failed").inc()
+            raise RuntimeError(f"llm call timed out after {settings.LLM_TOTAL_TIMEOUT}s total budget")
+        except AllProvidersFailedError:
+            llm_calls_total.labels(outcome="failed").inc()
+            raise
+        except Exception:
+            llm_calls_total.labels(outcome="client_error").inc()
+            raise
+        llm_calls_total.labels(outcome="success").inc()
+        return result
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @retry(
-        stop=stop_after_attempt(settings.MAX_LLM_CALL_RETRIES),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIError)),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=True,
-    )
-    async def _invoke_with_retry(self, llm: Any, messages: LanguageModelInput) -> Any:
-        """Invoke an LLM runnable with automatic per-model retry logic.
-
-        Args:
-            llm: Any LangChain ``Runnable`` (plain model or structured-output chain).
-            messages: Messages to send.
-
-        Returns:
-            The runnable's response (``BaseMessage`` or a ``BaseModel`` instance).
-
-        Raises:
-            Exception: Propagated after all retry attempts are exhausted —
-                OpenAI's error types on the backoff-retry path, or whatever
-                the invoked provider's runnable raised otherwise.
-        """
-        try:
-            response = await llm.ainvoke(messages)
-            logger.debug("llm_call_successful")
-            return response
-        except (RateLimitError, APITimeoutError, APIError) as e:
-            logger.warning(
-                "llm_call_failed_retrying",
-                error_type=type(e).__name__,
-                error=str(e),
-                exc_info=True,
-            )
-            raise
-        except (TypeError, AttributeError, KeyError):
-            # Programming errors, not provider failures — let them surface
-            # as-is instead of logging them as a failed LLM call.
-            raise
-        except Exception as e:
-            # The backoff retry above only matches OpenAI's error types, but a
-            # non-OpenAI registry entry can fail with its own provider's
-            # exception type — catch broadly so `_fallback_loop` still
-            # advances to the next model regardless of which one raised.
-            logger.error(
-                "llm_call_failed",
-                error_type=type(e).__name__,
-                error=str(e),
-            )
-            raise
-
-    def _switch_to_next_model(self) -> bool:
-        """Advance the default model to the next entry in the registry (circular).
-
-        Mutates ``self._llm`` and ``self._current_model_index`` so tool bindings
-        survive model switches on the default agent path.
-
-        Returns:
-            ``True`` on success, ``False`` if the switch failed.
-        """
-        try:
-            next_index = (self._current_model_index + 1) % len(LLMRegistry.LLMS)
-            next_entry = LLMRegistry.get_model_at_index(next_index)
-            logger.warning(
-                "switching_to_next_model",
-                from_index=self._current_model_index,
-                to_index=next_index,
-                to_model=next_entry["name"],
-            )
-            self._current_model_index = next_index
-            self._llm = next_entry["llm"]
-            if self._bound_tools:
-                self._llm = self._llm.bind_tools(self._bound_tools)
-            logger.info("model_switched", new_model=next_entry["name"], new_index=next_index)
-            return True
-        except Exception as e:
-            logger.error("model_switch_failed", error=str(e))
-            return False
-
-    async def _call_with_fallback(
+    def _ladder(
         self,
         messages: LanguageModelInput,
         model_name: Optional[str],
         response_format: Optional[Type[BaseModel]],
         model_kwargs: dict,
-    ) -> Union[BaseMessage, BaseModel]:
-        """Build path-specific strategies and delegate to the shared fallback loop.
+    ) -> list[tuple[str, Callable[[], Awaitable[Any]]]]:
+        names = LLMRegistry.get_all_names()
+        start = names.index(model_name or self._primary)
+        ordered = names[start:] + names[:start]
+        one_off = bool(model_name or response_format or model_kwargs)
 
-        One-off path (any override set):
-            ``get_target`` builds a fresh registry instance each attempt.
-            ``advance`` increments a local index — ``self._llm`` is never touched.
+        rungs: list[tuple[str, Callable[[], Awaitable[Any]]]] = []
+        for name in ordered:
+            if one_off:
 
-        Default path (no overrides):
-            ``get_target`` returns ``self._llm`` (tool-bound).
-            ``advance`` calls ``_switch_to_next_model`` so bindings persist.
-        """
+                def one_off_attempt(name: str = name) -> Awaitable[Any]:
+                    base = LLMRegistry.get(name, **model_kwargs)
+                    runnable = base.with_structured_output(response_format) if response_format else base
+                    return runnable.ainvoke(messages)
 
-        def _override_target(idx: int) -> Any:
-            base = LLMRegistry.get(LLMRegistry.LLMS[idx]["name"], **model_kwargs)
-            return base.with_structured_output(response_format) if response_format else base
+                rungs.append((name, one_off_attempt))
+            elif not self._bound_tools or name in self._bound:  # skip models that cannot call tools
+                runnable = self._bound.get(name) or LLMRegistry.get(name)
 
-        def _default_target(_: int) -> Any:
-            return self._llm
+                def bound_attempt(runnable: Any = runnable) -> Awaitable[Any]:
+                    return runnable.ainvoke(messages)
 
-        def _default_advance(_: int) -> Optional[int]:
-            return self._current_model_index if self._switch_to_next_model() else None
-
-        if model_name or response_format or model_kwargs:
-            all_names = LLMRegistry.get_all_names()
-            if model_name and model_name not in all_names:
-                logger.error("requested_model_not_found", model_name=model_name)
-                raise ValueError(
-                    f"model '{model_name}' not found in registry. available models: {', '.join(all_names)}"
-                )
-
-            start = all_names.index(model_name) if model_name else self._current_model_index
-            total = len(LLMRegistry.LLMS)
-            get_target: Callable[[int], Any] = _override_target
-
-            def _override_advance(idx: int) -> Optional[int]:
-                return (idx + 1) % total
-
-            advance: Callable[[int], Optional[int]] = _override_advance
-        else:
-            start = self._current_model_index
-            get_target = _default_target
-            advance = _default_advance
-
-        return await self._fallback_loop(messages, start, get_target, advance)
-
-    async def _fallback_loop(
-        self,
-        messages: LanguageModelInput,
-        start: int,
-        get_target: Callable[[int], Any],
-        advance: Callable[[int], Optional[int]],
-    ) -> Any:
-        """Shared fallback loop — try each model in turn until one succeeds.
-
-        Args:
-            messages: Messages to send.
-            start: Registry index to begin from.
-            get_target: Returns the ``Runnable`` to invoke for a given index.
-            advance: Returns the next index to try, or ``None`` to stop.
-
-        Returns:
-            The first successful response.
-
-        Raises:
-            RuntimeError: When all models have been exhausted.
-        """
-        total = len(LLMRegistry.LLMS)
-        current = start
-        models_tried = 0
-        last_error: Optional[Exception] = None
-
-        for models_tried in range(1, total + 1):
-            current_name = LLMRegistry.LLMS[current]["name"]
-            try:
-                return await self._invoke_with_retry(get_target(current), messages)
-            except (TypeError, AttributeError, KeyError):
-                # Programming errors would fail identically on every model, so
-                # re-raise immediately rather than cycling through the registry
-                # and leaving the service switched to a fallback model.
-                raise
-            except Exception as e:
-                # Broad on purpose: a registry entry can be any provider, and
-                # each has its own exception hierarchy, so this can't be
-                # narrowed to e.g. OpenAIError without breaking fallback for
-                # non-OpenAI models. ValueError from an invalid model_name is
-                # raised earlier in `_call_with_fallback`, before this loop.
-                last_error = e
-                logger.error(
-                    "llm_call_failed_after_retries",
-                    model=current_name,
-                    models_tried=models_tried,
-                    total_models=total,
-                    error=str(e),
-                )
-                if models_tried >= total:
-                    logger.error(
-                        "all_models_failed", models_tried=models_tried, starting_model=LLMRegistry.LLMS[start]["name"]
-                    )
-                    break
-                next_idx = advance(current)
-                if next_idx is None:
-                    logger.error("failed_to_switch_to_next_model")
-                    break
-                current = next_idx
-
-        raise RuntimeError(
-            f"failed to get response from llm after trying {models_tried} models. last error: {str(last_error)}"
-        )
+                rungs.append((name, bound_attempt))
+        return rungs
 
 
 llm_service = LLMService()

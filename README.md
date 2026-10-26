@@ -1,239 +1,119 @@
-# FastAPI LangGraph Agent Template
+# AI Kit — a production starter for LLM and agent apps
 
-A production-ready template for building AI agent backends with FastAPI and LangGraph. Handles the hard parts — stateful conversations, long-term memory, tool calling, observability, rate limiting, auth — so you can focus on your agent logic.
+A FastAPI + LangGraph application you start new agent apps from. It ships the parts every
+LLM product ends up needing, each one tested offline, documented, and off by default when it
+costs money or changes behaviour:
 
-**Built for AI engineers** who want a solid foundation, not a tutorial project.
+| Layer | What you get | Doc |
+|---|---|---|
+| Agent core | LangGraph agent with Postgres checkpointing, tool calling, human-in-the-loop, mem0 long-term memory, JWT sessions, rate limiting | [architecture](docs/architecture.md) |
+| RAG | Ingest md/txt/pdf/docx/html, hybrid retrieval (pgvector + BM25 with Vietnamese word segmentation + RRF), optional reranker, cited answers via `knowledge_search` | [rag](docs/rag.md) |
+| Guardrails | Prompt-injection and PII rails (EN + VI), optional LLM policy rail, human approval for risky tools, egress allowlist, output redaction while streaming | [guardrails](docs/guardrails.md) |
+| Reliability | One retry layer with classified errors, jitter and a retry budget, per-model circuit breakers, fallback ladder, answer cache with stale-if-error, SLO burn-rate alerts | [reliability](docs/reliability.md) |
+| Tools | Load MCP server tools, serve the knowledge base over MCP, serve the agent and call other agents over A2A | [tools](docs/tools.md) |
+| Agents | `ResilientChatModel` for any LangChain agent, a deep-research team (lead + researchers) on deepagents, citation checks | [agents](docs/agents.md) |
+| Evaluation | Golden-set evaluation: retrieval metrics, the real agent graded by a separate judge, judge-bias controls, CI gates | [evaluation](docs/evaluation.md) |
+| Delivery | Gated release to GHCR with SBOM and Trivy, nightly evals, non-root multi-stage image, per-user cost guard | [deployment](docs/deployment.md) |
 
----
-
-## Powered by Atlas Cloud — Drop-in LLM Backend for LangGraph Agents
-
-<div align="center">
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=fastapi-langgraph-agent-production-ready-template">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/atlas-cloud-logo-dark.png"/>
-      <img src="docs/atlas-cloud-logo.png" alt="Atlas Cloud" width="200"/>
-    </picture>
-  </a>
-</div>
-
-[**Atlas Cloud**](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=fastapi-langgraph-agent-production-ready-template) provides an **OpenAI-compatible LLM API** that integrates seamlessly into this FastAPI + LangGraph template — no code changes to your agent graph needed. Just swap `OPENAI_BASE_URL` and `OPENAI_API_KEY` to access **DeepSeek, Qwen, GLM, Kimi, MiniMax, Gemini, Claude, GPT** and more through a single unified endpoint.
-
-The `LLMRegistry` in this template uses `langchain_openai.ChatOpenAI` — Atlas Cloud is wire-compatible, so you get instant access to 130+ curated models without touching any LangGraph logic.
-
-### Quick Setup
-
-**Step 1 — Get your free API key:** [atlascloud.ai/console/coding-plan](https://www.atlascloud.ai/console/coding-plan)
-
-**Step 2 — Update `.env.development`:**
-
-```env
-OPENAI_API_KEY=<your-atlascloud-key>
-OPENAI_BASE_URL=https://api.atlascloud.ai/v1
-DEFAULT_LLM_MODEL=deepseek-ai/deepseek-v4-pro
-```
-
-**Step 3 — Or use directly in code:**
-
-```python
-from langchain_openai import ChatOpenAI
-
-llm = ChatOpenAI(
-    model="deepseek-ai/deepseek-v4-pro",
-    openai_api_base="https://api.atlascloud.ai/v1",
-    openai_api_key="<your-atlascloud-key>",
-    max_tokens=512,  # reasoning model requires max_tokens >= 512
-)
-```
-
-This works as a drop-in replacement anywhere `ChatOpenAI` is used in your LangGraph agent — including the `LLMRegistry`, the circular fallback service, and mem0 long-term memory.
-
-<details>
-<summary>📋 Model catalog — a current selection (136 available in total)</summary>
-
-| Model ID | Provider |
-|---|---|
-| `openai/gpt-5.6-luna` | OpenAI |
-| `openai/gpt-5.6-sol` | OpenAI |
-| `openai/gpt-5.6-terra` | OpenAI |
-| `openai/gpt-5.5` | OpenAI |
-| `openai/gpt-5.4` | OpenAI |
-| `openai/gpt-5.4-mini` | OpenAI |
-| `openai/gpt-5.4-nano` | OpenAI |
-| `openai/gpt-5.3-codex` | OpenAI |
-| `openai/gpt-5.2` | OpenAI |
-| `anthropic/claude-opus-5` | Anthropic |
-| `anthropic/claude-sonnet-5` | Anthropic |
-| `anthropic/claude-opus-4.8` | Anthropic |
-| `anthropic/claude-sonnet-4.6` | Anthropic |
-| `anthropic/claude-haiku-4.5-20251001` | Anthropic |
-| `google/gemini-3.5-flash` | Google |
-| `google/gemini-3.1-pro-preview` | Google |
-| `google/gemini-3.1-flash-lite` | Google |
-| `google/gemini-2.5-pro` | Google |
-| `deepseek-ai/deepseek-v4-pro` | DeepSeek |
-| `deepseek-ai/deepseek-v4-flash` | DeepSeek |
-| `qwen/qwen3.8-max` | Alibaba Qwen |
-| `qwen/qwen3.7-plus` | Alibaba Qwen |
-| `qwen/qwen3.5-plus` | Alibaba Qwen |
-| `moonshotai/kimi-k3` | Moonshot AI |
-| `moonshotai/kimi-k2.7-code` | Moonshot AI |
-| `zai-org/glm-5.2` | Zhipu AI |
-| `zai-org/glm-5.1` | Zhipu AI |
-| `zai-org/glm-5` | Zhipu AI |
-| `minimaxai/minimax-m3` | MiniMax |
-| `minimaxai/minimax-m2.7` | MiniMax |
-| `xai/grok-4.6` | xAI |
-| `xai/grok-4.5` | xAI |
-| `bytedance/doubao-seed-2.1-pro-260628` | ByteDance |
-| `xiaomi/mimo-v2.5-pro` | Xiaomi |
-| `tencent/hy3` | Tencent |
-
-[View live model list →](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=fastapi-langgraph-agent-production-ready-template)
-
-</details>
-
----
-
-## What's included
-
-- **LangGraph** stateful agent with checkpointing, tool calling, and human-in-the-loop support
-- **Long-term memory** via mem0 + pgvector — semantic search per user, cache-backed
-- **LLM service** with circular model fallback, exponential backoff retries, and total timeout budget
-- **Langfuse** tracing on all LLM calls; Prometheus metrics + Grafana dashboards
-- **JWT auth** with session management; rate limiting via slowapi
-- **Alembic** migrations; optional Valkey/Redis cache layer
-- **Structured logging** with request/session/user context on every line
-
-## Quickstart
+## Start a new app
 
 ```bash
-git clone <repo-url> my-agent && cd my-agent
-cp .env.example .env.development   # fill in your keys
-make install
-make docker-up                     # starts API + PostgreSQL
+# generate a project and choose its features
+uvx copier copy --trust <kit-repo-or-path> my-app
+cd my-app && git init
+
+# or clone the kit and set it up in place
+python3 scripts/bootstrap.py --features rag,answer-cache
 ```
 
-Open [http://localhost:8000/docs](http://localhost:8000/docs) to see the interactive API.
+Either way you get `.env.development` with a random JWT secret and the chosen features on,
+plus the next commands to run:
 
-> For local development without Docker see [docs/getting-started.md](docs/getting-started.md).
+```bash
+uv sync                          # add --extra rerank / a2a / deep for those features
+make test                        # offline test suite, no API key needed
+# put OPENAI_API_KEY in .env.development, then
+make docker-up                   # API + Postgres/pgvector: http://localhost:8000/docs
+make ingest CORPUS=path/to/docs  # load documents into the knowledge base
+```
 
-## Documentation
+Update a generated app with later kit improvements: `uvx copier update --trust`.
 
-| Guide | What it covers |
+### First request
+
+```bash
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/register -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "password": "Secret123!", "username": "you"}' | jq -r .token.access_token)  # pragma: allowlist secret
+SESSION=$(curl -s -X POST localhost:8000/api/v1/auth/session -H "Authorization: Bearer $TOKEN" | jq -r .token.access_token)
+curl -X POST localhost:8000/api/v1/chatbot/chat -H "Authorization: Bearer $SESSION" \
+  -H "Content-Type: application/json" -d '{"messages": [{"role": "user", "content": "Hello!"}]}'
+```
+
+See [getting started](docs/getting-started.md) for local development without Docker.
+
+## Everyday commands
+
+| Command | Does |
 |---|---|
-| [Getting Started](docs/getting-started.md) | Prerequisites, local setup, first API call |
-| [Architecture](docs/architecture.md) | System design, request flow, component diagrams |
-| [Configuration](docs/configuration.md) | All environment variables with defaults |
-| [Authentication](docs/authentication.md) | JWT flow, sessions, endpoint reference |
-| [Database & Migrations](docs/database.md) | Schema, Alembic migrations, pgvector |
-| [LLM Service](docs/llm-service.md) | Models, retries, fallback, timeout budget |
-| [Memory](docs/memory.md) | mem0 long-term memory, cache layer |
-| [Observability](docs/observability.md) | Langfuse, structured logging, Prometheus, profiling |
-| [Evaluation](docs/evaluation.md) | Eval framework, custom metrics, reports |
-| [Docker](docs/docker.md) | Docker, Compose, full monitoring stack |
+| `make test` | Run the test suite (offline; integration tests skip unless `RAG_TEST_PG_URL` is set) |
+| `make check` | ruff + pyright |
+| `make dev` | Run the API locally with reload |
+| `make ingest CORPUS=dir` | Ingest documents (re-runs skip unchanged chunks and invalidate stale cached answers) |
+| `make eval-rag-offline` | Retrieval regression check on the sample golden set (the CI gate) |
+| `make eval-rag` | Full golden-set evaluation with a judge model |
+| `python -m app.mcp_server` | Serve the knowledge base to other agents over MCP (stdio) |
+| `python -m scripts.research "topic"` | Run the deep-research team from the command line |
+| `make stack-up` | API, Postgres, Valkey, Prometheus (with SLO alerts), Grafana |
 
 ## Project structure
 
 ```
 app/
-  api/v1/          # Route handlers
-  core/
-    langgraph/     # Agent graph + tools
-    prompts/       # System prompt template
-    cache.py       # Valkey/Redis + in-memory fallback
-    config.py      # Settings
-    middleware.py  # Metrics, logging context, profiling
-    limiter.py     # Rate limiting
-  models/          # SQLModel ORM models
-  schemas/         # Pydantic request/response schemas
-  services/        # LLM, database, memory services
-alembic/           # Database migrations
-evals/             # LLM evaluation framework
+  api/v1/                 route handlers (auth, chat, streaming)
+  core/langgraph/         agent graph: input guard -> chat -> tools (approval, screening) -> output rail
+  core/                   settings, logging, metrics, middleware, cache, rate limits, prompts
+  services/
+    llm/                  model registry and the resilient call path
+    reliability/          error classes, retry budget, circuit breakers, invoker, answer cache
+    rag/                  ingestion, chunking, embeddings, stores, ranking, citations
+    guardrails/           detectors, LLM policy rail, tool policy, stream redaction
+    mcp/  a2a/            MCP toolkit; A2A server and remote-agent tool
+    agents/               ResilientChatModel, deep-research team
+    evaluation/           golden sets, retrieval metrics, judge, reports
+    cost_guard.py         per-user monthly budget
+  mcp_server.py           the knowledge base as an MCP server
+scripts/                  bootstrap, ingest, eval_rag, research
+evals/                    Langfuse trace evaluator (base template) and datasets/ (golden sets)
+prometheus/               scrape config, SLO alert rules and their promtool tests
+tests/                    offline tests for every layer
+docs/                     one page per layer; ROADMAP.md lists them
 ```
 
-## Contributing
+## Documentation
 
-PRs welcome. Please read [docs/getting-started.md](docs/getting-started.md) to get your environment set up, then follow the coding conventions in [AGENTS.md](AGENTS.md).
+| Guide | What it covers |
+|---|---|
+| [Roadmap](docs/ROADMAP.md) | The layers, their status and where each came from |
+| [Getting started](docs/getting-started.md) | Prerequisites, local setup, first API call |
+| [Architecture](docs/architecture.md) | System design, request flow |
+| [Configuration](docs/configuration.md) | Base environment variables (each layer's page lists its own) |
+| [Authentication](docs/authentication.md) | JWT flow, sessions |
+| [Database](docs/database.md) | Schema, Alembic migrations, pgvector |
+| [LLM service](docs/llm-service.md) | Model registry, fallback ladder, structured output |
+| [Memory](docs/memory.md) | mem0 long-term memory |
+| [RAG](docs/rag.md), [Guardrails](docs/guardrails.md), [Reliability](docs/reliability.md), [Tools](docs/tools.md), [Agents](docs/agents.md), [Evaluation](docs/evaluation.md), [Deployment](docs/deployment.md) | The kit layers |
+| [Observability](docs/observability.md) | Langfuse, structured logs, Prometheus, profiling |
+| [Docker](docs/docker.md) | Compose and the monitoring stack |
 
-Report security issues privately — see [SECURITY.md](SECURITY.md).
+Coding conventions for people and coding agents: [AGENTS.md](AGENTS.md).
 
-## License
+## Where it comes from
 
-See [LICENSE](LICENSE).
+- Base: [fastapi-langgraph-agent-production-ready-template](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template) (MIT).
+- Layers ported or specified from the AI20K (VinUniversity) labs, mostly from the author's own
+  solutions: D08 RAG, D11 guardrails, D12 deployment, D14 evaluation, D09 MCP/A2A; and from the
+  lab specifications of D16, D18, D23, D24, D25. Each layer's doc names the files and commits.
+- Libraries chosen per concern: LangGraph, LangChain (`langchain.mcp`), deepagents, FastMCP,
+  a2a-sdk, MarkItDown, underthesea, bm25s, rerankers, pgvector.
 
-## FAQ
-
-### General
-
-**What is this template?**
-A production-ready foundation for AI agent backends built on FastAPI + LangGraph. It bundles the components you'd otherwise wire up by hand: stateful conversations, long-term memory, tool calling, observability, rate limiting, and JWT auth.
-
-**How does this differ from a basic LangGraph setup?**
-The base LangGraph quickstart stops at "agent runs locally". This template adds Alembic migrations, mem0 + pgvector long-term memory, Langfuse tracing, Prometheus + Grafana dashboards, JWT sessions, slowapi rate limiting, structured logging with per-request context, and a circular-fallback LLM service — production concerns you'd otherwise build separately.
-
-### Setup & Configuration
-
-**Do I need Docker?**
-Recommended but not required. `make docker-up` starts the API + PostgreSQL together. For local-only setup see [docs/getting-started.md](docs/getting-started.md).
-
-**Which LLM providers are supported?**
-Any provider LangChain's [`init_chat_model`](https://python.langchain.com/docs/how_to/chat_models_universal_init/) supports. The `LLMRegistry` in `app/services/llm/registry.py` builds every model through `init_chat_model`, so a bare name like `gpt-5.6-luna` keeps resolving to OpenAI unchanged, while a `provider:model` string (e.g. `anthropic:claude-opus-4-6`, `ollama:llama3`) adds any other provider. Install that provider's LangChain integration package — see the `anthropic` / `ollama` / `google-genai` extras in `pyproject.toml` — and set its API key via the provider's own env var (e.g. `ANTHROPIC_API_KEY`). Configure the default model via `DEFAULT_LLM_MODEL` in `.env.development`.
-
-```bash
-# uv sync with the anthropic extra installed
-uv sync --extra anthropic
-```
-
-```python
-# app/services/llm/registry.py
-LLM_CONFIGS: List[Dict[str, Any]] = [
-    {"name": "gpt-5.6-luna", "model": "gpt-5.6-luna", "kwargs": {...}},  # OpenAI, unchanged
-    {"name": "claude-opus", "model": "anthropic:claude-opus-4-6", "kwargs": {"temperature": 0.2}},
-]
-```
-
-**How do I configure long-term memory?**
-Long-term memory is self-hosted: mem0 runs in-process and persists into your existing PostgreSQL via pgvector — there is no separate mem0 cloud account or API key. You only need a working `OPENAI_API_KEY` (used for fact extraction + embeddings) and the pgvector extension enabled. See [docs/memory.md](docs/memory.md) for details.
-
-### Development
-
-**How do I add a custom tool?**
-Drop a LangChain `@tool`-decorated function in `app/core/langgraph/tools/` and register it in the `tools` list exported from that package. The agent picks it up on next start; no graph changes needed.
-
-**Can I run multiple agents (supervisor, sub-agents)?**
-Yes. The template ships a single agent, but any compiled graph can be added as a node of the main graph. It shares `GraphState` (so `messages` flow through) and inherits the parent's Postgres checkpointer, so no extra persistence setup is needed. In `create_graph()` in `app/core/langgraph/graph.py`:
-
-```python
-research = StateGraph(GraphState)
-research.add_node("research", research_node)
-research.set_entry_point("research")
-research_agent = research.compile()  # no checkpointer: inherits the parent's
-
-graph_builder.add_node("chat", self._chat, destinations=("tool_call", "research_agent", END))
-graph_builder.add_node("research_agent", research_agent)
-graph_builder.add_edge("research_agent", "chat")
-```
-
-`chat` then acts as the supervisor: return `Command(goto="research_agent")` to delegate, and the sub-agent's reply comes back to `chat`. Add one node per specialist. For a prebuilt version, see [`langgraph-supervisor`](https://github.com/langchain-ai/langgraph-supervisor-py).
-
-**How does the LLM service handle failures?**
-Two layers: (1) per-call exponential-backoff retry via `tenacity`, (2) **circular fallback** — if the active model exhausts its retries, the service rotates to the next model in `LLMRegistry` and continues. A total timeout budget caps the whole call so latency stays bounded. See [docs/llm-service.md](docs/llm-service.md).
-
-**Can I use this without Langfuse?**
-Yes. Set `LANGFUSE_TRACING_ENABLED=false` (or omit the Langfuse keys). The agent runs unchanged; structured logs still capture request/session/user context.
-
-### Troubleshooting
-
-**The API won't start**
-- Ensure PostgreSQL is running (`make docker-up` brings it up alongside the API)
-- Confirm `.env.development` exists — copy from `.env.example` and fill in required keys
-- Apply migrations: `make migrate`
-
-**Memory / semantic search returns nothing**
-- Verify the `pgvector` extension is enabled in your PostgreSQL instance
-- Confirm `OPENAI_API_KEY` is valid (mem0 calls OpenAI for fact extraction + embeddings)
-- Check `LONG_TERM_MEMORY_MODEL` and `LONG_TERM_MEMORY_EMBEDDER_MODEL` are set in `.env.development`
-
-**Rate limiting is too aggressive**
-Limits are defined in `app/core/limiter.py` (slowapi). Adjust per-route decorators or the default rate in that file. See [docs/configuration.md](docs/configuration.md) for the related env vars.
+Security issues: see [SECURITY.md](SECURITY.md). License: [LICENSE](LICENSE) (MIT, from the base template).

@@ -8,6 +8,19 @@ on:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    services:
+      # Integration tests for the RAG vector store and the answer cache run against it.
+      pgvector:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -17,3 +30,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright
+      - run: uv run pytest -q
+        env:
+          RAG_TEST_PG_URL: postgresql://postgres:test@localhost:5432/postgres
+      - name: Prometheus alert rules
+        run: docker run --rm -v "$PWD/prometheus:/p" --entrypoint promtool prom/prometheus:v3.15.1 test rules /p/alerts_test.yml

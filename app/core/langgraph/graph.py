@@ -12,9 +12,11 @@ from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     BaseMessage,
+    HumanMessage,
     ToolMessage,
     convert_to_openai_messages,
 )
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.errors import GraphInterrupt
 from langgraph.graph import (
@@ -22,13 +24,14 @@ from langgraph.graph import (
     StateGraph,
 )
 from langchain_core.runnables.config import RunnableConfig
+from langchain_core.tools import BaseTool
 from langgraph.graph.state import (
     Command,
     CompiledStateGraph,
 )
 from langgraph.types import (
-    RetryPolicy,
     StateSnapshot,
+    interrupt,
 )
 from psycopg import (
     AsyncConnection,
@@ -43,15 +46,30 @@ from psycopg_pool import AsyncConnectionPool
 from app.core.config import settings
 from app.core.langgraph.tools import tools
 from app.core.logging import logger
-from app.core.metrics import llm_inference_duration_seconds
+from app.core.metrics import (
+    answer_cache_events_total,
+    llm_inference_duration_seconds,
+    rag_citation_issues_total,
+)
 from app.core.observability import langfuse_callback_handler
 from app.core.prompts import load_system_prompt
 from app.schemas import (
     GraphState,
     Message,
 )
+from app.services.guardrails import (
+    get_guardrails,
+    is_affirmative,
+)
 from app.services.llm import llm_service
+from app.services.cost_guard import get_cost_guard
 from app.services.memory import memory_service
+from app.services.rag.citations import (
+    check_answer,
+    cited_labels,
+)
+from app.services.rag.pipeline import INSUFFICIENT_EVIDENCE
+from app.services.reliability import get_answer_cache
 from app.utils import (
     dump_messages,
     extract_text_content,
@@ -83,6 +101,20 @@ class LangGraphAgent:
             model=settings.DEFAULT_LLM_MODEL,
             environment=settings.ENVIRONMENT.value,
         )
+
+    def register_tools(self, extra: list[BaseTool]) -> None:
+        """Add tools discovered at runtime (e.g. from MCP servers) and rebind the models.
+
+        The compiled graph looks tools up by name on every call, so it does not
+        need rebuilding. Built-in tools win on a name clash.
+        """
+        new = [t for t in extra if t.name not in self.tools_by_name]
+        clashes = [t.name for t in extra if t.name in self.tools_by_name]
+        if clashes:
+            logger.warning("tools_name_clash_skipped", tools=clashes)
+        self.tools_by_name.update({t.name: t for t in new})
+        self.llm_service.bind_tools(list(self.tools_by_name.values()))
+        logger.info("tools_registered", added=[t.name for t in new], total=len(self.tools_by_name))
 
     async def _get_connection_pool(self) -> PostgresConnPool:
         """Get a PostgreSQL connection pool using environment-specific settings.
@@ -126,6 +158,50 @@ class LangGraphAgent:
                 # loses data rather than surfacing an outage.
                 raise e
         return self._connection_pool
+
+    @staticmethod
+    def _check_citations(messages: list, answer: str) -> None:
+        """Flag answers citing a source number that knowledge_search never returned (observability only)."""
+        source_count = 0
+        for message in reversed(messages):
+            if isinstance(message, HumanMessage):
+                break
+            if isinstance(message, ToolMessage) and message.name == "knowledge_search":
+                labels = cited_labels(extract_text_content(message.content))
+                source_count = max(source_count, max(labels, default=0))
+        if not source_count:
+            return
+        result = check_answer(answer, source_count)
+        if result.out_of_range:
+            rag_citation_issues_total.labels(kind="out_of_range").inc()
+            logger.warning("rag_citation_out_of_range", labels=result.out_of_range, sources=source_count)
+        elif not result.cited and INSUFFICIENT_EVIDENCE not in answer:
+            rag_citation_issues_total.labels(kind="uncited").inc()
+            logger.info("rag_answer_without_citations", sources=source_count)
+
+    async def _input_guard(self, state: GraphState) -> Command:
+        """Run the input rails on the newest user message before the model sees it.
+
+        A blocked message gets the refusal as the reply and ends the turn. PII is
+        replaced in the stored message too, so it never reaches the checkpointer
+        in clear text when the rails redact or block it.
+        """
+        last = state.messages[-1] if state.messages else None
+        if not isinstance(last, HumanMessage):
+            return Command(goto="chat")
+
+        guard = get_guardrails()
+        original = extract_text_content(last.content)
+        decision = await guard.check_input(original)
+        updates: list[BaseMessage] = []
+        pii = [f for f in decision.findings if f.kind != "prompt_injection"]
+        if pii:
+            stored = decision.text if decision.allowed else guard.redact_for_storage(original)
+            updates.append(HumanMessage(content=stored, id=last.id))
+        if not decision.allowed:
+            updates.append(AIMessage(content=guard.refusal_message))
+            return Command(update={"messages": updates}, goto=END)
+        return Command(update={"messages": updates} if updates else {}, goto="chat")
 
     async def _chat(self, state: GraphState, config: RunnableConfig) -> Command:
         """Process the chat state and generate a response.
@@ -172,6 +248,11 @@ class LangGraphAgent:
                 goto = "tool_call"
             else:
                 goto = END
+                # Output rail: the stored and returned answer never carries PII/secrets.
+                checked = get_guardrails().check_output(extract_text_content(response_message.content))
+                if checked.redacted:
+                    response_message.content = checked.text
+                self._check_citations(state.messages, checked.text)
 
             return Command(update={"messages": [response_message]}, goto=goto)
         except Exception as e:
@@ -185,7 +266,12 @@ class LangGraphAgent:
 
     # Define our tool node
     async def _tool_call(self, state: GraphState) -> Command:
-        """Process tool calls from the last message.
+        """Process tool calls from the last message under the tool rails.
+
+        Every call is authorized first: calls the policy forbids get an error
+        result, and high-risk tools pause the graph for human approval. All
+        approvals are collected before any tool runs, because a resumed node
+        re-executes from the start and side effects must not repeat.
 
         Args:
             state: The current agent state containing messages and tool calls.
@@ -193,26 +279,70 @@ class LangGraphAgent:
         Returns:
             Command: Command object with updated messages and routing back to chat.
         """
+        guard = get_guardrails()
         tool_calls = state.messages[-1].tool_calls
 
-        async def _execute_tool(tool_call: dict) -> ToolMessage:
-            tool_result = await self.tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
+        verdicts: list[Optional[str]] = []  # None = run it, otherwise the reason it was not run
+        for tool_call in tool_calls:
+            if tool_call["name"] not in self.tools_by_name:
+                verdicts.append(f"unknown tool {tool_call['name']!r}")
+                continue
+            decision = guard.authorize_tool_call(tool_call["name"], tool_call["args"])
+            if not decision.allowed:
+                logger.info("guard_tool_call_blocked", tool=tool_call["name"], reason=decision.reason)
+                verdicts.append(f"blocked by policy: {decision.reason}")
+            elif decision.needs_approval:
+                answer = interrupt(guard.approval_question(tool_call["name"], tool_call["args"]))
+                approved = is_affirmative(answer)
+                logger.info("guard_tool_call_reviewed", tool=tool_call["name"], approved=approved)
+                verdicts.append(None if approved else "the user did not approve this action")
+            else:
+                verdicts.append(None)
+
+        async def _execute_tool(tool_call: dict, refusal: Optional[str]) -> ToolMessage:
+            artifact = None
+            if refusal is not None:
+                content = f"Tool call not executed: {refusal}."
+            else:
+                try:
+                    # Invoking with the full ToolCall returns a ToolMessage, which keeps
+                    # the artifact of tools declared with response_format="content_and_artifact".
+                    result = await self.tools_by_name[tool_call["name"]].ainvoke({**tool_call, "type": "tool_call"})
+                    raw = extract_text_content(result.content if isinstance(result, ToolMessage) else result)
+                    artifact = result.artifact if isinstance(result, ToolMessage) else None
+                    content = guard.screen_tool_result(tool_call["name"], raw)
+                    if content != raw:
+                        # The artifact (e.g. MCP structured content) holds the same untrusted
+                        # text; drop it so nothing downstream renders the unscreened copy.
+                        artifact = None
+                except Exception as e:
+                    # Report the error to the model instead of retrying the node: a node
+                    # retry would re-run every tool in it, repeating side effects.
+                    logger.warning("tool_call_failed", tool=tool_call["name"], error=str(e))
+                    content = f"Tool error: {type(e).__name__}: {e}"
             return ToolMessage(
-                content=tool_result,
+                content=content,
                 name=tool_call["name"],
                 tool_call_id=tool_call["id"],
+                artifact=artifact,
             )
 
         # Execute tool calls concurrently when multiple are requested
         if len(tool_calls) == 1:
-            outputs = [await _execute_tool(tool_calls[0])]
+            outputs = [await _execute_tool(tool_calls[0], verdicts[0])]
         else:
-            outputs = list(await asyncio.gather(*[_execute_tool(tc) for tc in tool_calls]))
+            outputs = list(
+                await asyncio.gather(*[_execute_tool(tc, v) for tc, v in zip(tool_calls, verdicts, strict=True)])
+            )
 
         return Command(update={"messages": outputs}, goto="chat")
 
-    async def create_graph(self) -> CompiledStateGraph:
+    async def create_graph(self, checkpointer: Optional[BaseCheckpointSaver] = None) -> CompiledStateGraph:
         """Create and configure the LangGraph workflow.
+
+        Args:
+            checkpointer: Optional checkpointer to use instead of the Postgres one.
+                Tests pass an in-memory saver so the graph runs without a database.
 
         Returns:
             CompiledStateGraph: The configured LangGraph instance, always with a checkpointer.
@@ -223,20 +353,17 @@ class LangGraphAgent:
         if self._graph is None:
             try:
                 graph_builder = StateGraph(GraphState)
+                graph_builder.add_node("input_guard", self._input_guard, destinations=("chat", END))
                 graph_builder.add_node("chat", self._chat, destinations=("tool_call", END))
-                graph_builder.add_node(
-                    "tool_call",
-                    self._tool_call,
-                    destinations=("chat",),
-                    retry_policy=RetryPolicy(max_attempts=3),
-                )
-                graph_builder.set_entry_point("chat")
+                graph_builder.add_node("tool_call", self._tool_call, destinations=("chat",))
+                graph_builder.set_entry_point("input_guard")
                 graph_builder.set_finish_point("chat")
 
-                # Raises if the pool cannot be created — no checkpointer, no service.
-                connection_pool = await self._get_connection_pool()
-                checkpointer = AsyncPostgresSaver(connection_pool)
-                await checkpointer.setup()
+                if checkpointer is None:
+                    # Raises if the pool cannot be created — no checkpointer, no service.
+                    connection_pool = await self._get_connection_pool()
+                    checkpointer = AsyncPostgresSaver(connection_pool)
+                    await checkpointer.setup()
 
                 self._graph = graph_builder.compile(
                     checkpointer=checkpointer, name=f"{settings.PROJECT_NAME} Agent ({settings.ENVIRONMENT.value})"
@@ -264,6 +391,68 @@ class LangGraphAgent:
         if self._graph is None:
             self._graph = await self.create_graph()
         return self._graph
+
+    @staticmethod
+    def _awaiting_human(state: StateSnapshot) -> bool:
+        """True only when a task is paused on ``interrupt()``.
+
+        ``state.next`` alone is not enough: a node that raised (all providers down)
+        also leaves ``next`` set, and treating the user's next message as a resume
+        value would silently drop their question.
+        """
+        return bool(state.next) and any(task.interrupts for task in state.tasks)
+
+    async def _cache_question(self, state: StateSnapshot, messages: list[Message]) -> Optional[str]:
+        """Return the question when this turn may use the answer cache, else None.
+
+        Only the first question of a new conversation qualifies (later turns depend
+        on context), and only if the deterministic input rails find nothing in it.
+        """
+        cache = get_answer_cache()
+        if cache is None or state.next or (state.values or {}).get("messages"):
+            return None
+        if messages[-1].role != "user" or sum(m.role == "user" for m in messages) != 1:
+            return None
+        question = messages[-1].content
+        decision = await get_guardrails().check_input(question, use_llm_rail=False)
+        if not decision.allowed or decision.findings or not cache.is_cacheable(question):
+            return None
+        return question
+
+    async def _answer_from_cache(
+        self, graph: CompiledStateGraph, config: RunnableConfig, question: str, allow_stale: bool
+    ) -> Optional[str]:
+        """Serve a cached answer and record the turn in the conversation history."""
+        cache = get_answer_cache()
+        hit = await cache.lookup(question, allow_stale=allow_stale) if cache else None
+        if hit is None:
+            answer_cache_events_total.labels(outcome="miss").inc()
+            return None
+        current = await graph.aget_state(config)
+        existing = (current.values or {}).get("messages") or []
+        already_has_question = bool(existing) and isinstance(existing[-1], HumanMessage)
+        new_messages: list[BaseMessage] = [] if already_has_question else [HumanMessage(content=question)]
+        new_messages.append(AIMessage(content=hit.answer))
+        await graph.aupdate_state(config, {"messages": new_messages}, as_node="chat")
+        outcome = "hit_fresh" if hit.fresh else "hit_stale"
+        answer_cache_events_total.labels(outcome=outcome).inc()
+        logger.info("answer_cache_served", outcome=outcome, similarity=round(hit.similarity, 4), age_s=int(hit.age_s))
+        return hit.answer
+
+    async def _store_in_cache(self, question: str, final_messages: list[BaseMessage]) -> None:
+        """Cache the final answer if it was built from knowledge_search results."""
+        cache = get_answer_cache()
+        last = final_messages[-1] if final_messages else None
+        if cache is None or not isinstance(last, AIMessage) or last.tool_calls:
+            return
+        sources: list[str] = []
+        for message in reversed(final_messages):
+            if isinstance(message, HumanMessage):
+                break
+            if isinstance(message, ToolMessage) and message.name == "knowledge_search":
+                sources.extend(message.artifact or [])
+        if sources and await cache.store_answer(question, extract_text_content(last.content), sources):
+            answer_cache_events_total.labels(outcome="stored").inc()
 
     async def get_response(
         self,
@@ -301,21 +490,37 @@ class LangGraphAgent:
             # Run state check and memory search concurrently to save 200-500ms
             state, relevant_memory = await asyncio.gather(
                 graph.aget_state(config),
-                memory_service.search(user_id, messages[-1].content),
+                memory_service.search(user_id, get_guardrails().redact_for_storage(messages[-1].content)),
             )
 
-            if state.next:
-                logger.info("resuming_interrupted_graph", session_id=session_id, next_nodes=state.next)
-                response = await graph.ainvoke(
-                    Command(resume=messages[-1].content),
-                    config=config,
-                )
-            else:
-                relevant_memory = relevant_memory or "No relevant memory found."
-                response = await graph.ainvoke(
-                    input={"messages": dump_messages(messages), "long_term_memory": relevant_memory},
-                    config=config,
-                )
+            await get_cost_guard().check(user_id or "anonymous")
+            question = await self._cache_question(state, messages)
+            if question:
+                cached = await self._answer_from_cache(graph, config, question, allow_stale=False)
+                if cached is not None:
+                    return [Message(role="assistant", content=cached)]
+
+            try:
+                if self._awaiting_human(state):
+                    logger.info("resuming_interrupted_graph", session_id=session_id, next_nodes=state.next)
+                    response = await graph.ainvoke(
+                        Command(resume=messages[-1].content),
+                        config=config,
+                    )
+                else:
+                    relevant_memory = relevant_memory or "No relevant memory found."
+                    response = await graph.ainvoke(
+                        input={"messages": dump_messages(messages), "long_term_memory": relevant_memory},
+                        config=config,
+                    )
+            except GraphInterrupt:
+                raise
+            except Exception:
+                # stale-if-error: a slightly old answer to a knowledge question beats an error.
+                stale = await self._answer_from_cache(graph, config, question, allow_stale=True) if question else None
+                if stale is None:
+                    raise
+                return [Message(role="assistant", content=stale)]
 
             # Check if the graph was interrupted during this invocation
             state = await graph.aget_state(config)
@@ -325,6 +530,9 @@ class LangGraphAgent:
                 return [Message(role="assistant", content=str(interrupt_value))]
 
             create_background_task(memory_service.add(user_id, response["messages"]))
+            create_background_task(get_cost_guard().record(user_id or "anonymous", response["messages"]))
+            if question:
+                create_background_task(self._store_in_cache(question, response["messages"]))
             return self.__process_messages(response["messages"])
         except GraphInterrupt:
             state = await graph.aget_state(config)
@@ -371,27 +579,55 @@ class LangGraphAgent:
             # Run state check and memory search concurrently to save 200-500ms
             state, relevant_memory = await asyncio.gather(
                 graph.aget_state(config),
-                memory_service.search(user_id, messages[-1].content),
+                memory_service.search(user_id, get_guardrails().redact_for_storage(messages[-1].content)),
             )
 
-            if state.next:
+            await get_cost_guard().check(user_id or "anonymous")
+            question = await self._cache_question(state, messages)
+            if question:
+                cached = await self._answer_from_cache(graph, config, question, allow_stale=False)
+                if cached is not None:
+                    yield cached
+                    return
+
+            if self._awaiting_human(state):
                 logger.info("resuming_interrupted_graph_stream", session_id=session_id, next_nodes=state.next)
                 graph_input = Command(resume=messages[-1].content)
             else:
                 relevant_memory = relevant_memory or "No relevant memory found."
                 graph_input = {"messages": dump_messages(messages), "long_term_memory": relevant_memory}
 
-            async for token, _ in graph.astream(
-                graph_input,
-                config,
-                stream_mode="messages",
-            ):
-                if not isinstance(token, (AIMessage, AIMessageChunk)):
-                    continue
+            redactor = get_guardrails().stream_redactor()
+            emitted = False
+            try:
+                async for token, _ in graph.astream(
+                    graph_input,
+                    config,
+                    stream_mode="messages",
+                ):
+                    if not isinstance(token, (AIMessage, AIMessageChunk)):
+                        continue
 
-                text = extract_text_content(token.content)
-                if text:
-                    yield text
+                    text = redactor.feed(extract_text_content(token.content))
+                    if text:
+                        emitted = True
+                        yield text
+            except GraphInterrupt:
+                raise
+            except Exception:
+                # stale-if-error, but only before any text went out: never splice two answers.
+                stale = (
+                    await self._answer_from_cache(graph, config, question, allow_stale=True)
+                    if question and not emitted
+                    else None
+                )
+                if stale is None:
+                    raise
+                yield stale
+                return
+            tail = redactor.flush()
+            if tail:
+                yield tail
 
             # After streaming completes, check for interrupt or update memory
             state = await graph.aget_state(config)
@@ -401,6 +637,9 @@ class LangGraphAgent:
                 yield str(interrupt_value)
             elif state.values and "messages" in state.values:
                 create_background_task(memory_service.add(user_id, state.values["messages"]))
+                create_background_task(get_cost_guard().record(user_id or "anonymous", state.values["messages"]))
+                if question:
+                    create_background_task(self._store_in_cache(question, state.values["messages"]))
         except GraphInterrupt:
             state = await graph.aget_state(config)
             interrupt_value = state.tasks[0].interrupts[0].value if state.tasks else "Waiting for input."

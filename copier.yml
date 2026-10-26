@@ -1,0 +1,57 @@
+# Generate a new app from this kit:
+#   uvx copier copy --trust gh:<owner>/ai-kit my-app        (or a local path to the kit)
+# Update it later with the kit's improvements:
+#   cd my-app && uvx copier update --trust
+#
+# The kit stays a normal, runnable app: no file is a Jinja template except the answers file.
+# Project-specific setup is done by scripts/bootstrap.py (which is why --trust is needed).
+
+_min_copier_version: "9.4.0"
+_answers_file: .copier-answers.yml
+_exclude:
+  - copier.yml
+  - .git
+  - .venv
+  - logs
+  - reports
+  - .flashrank_cache
+  - .pytest_cache
+  - .ruff_cache
+  - "**/__pycache__"
+  - ".env.*"
+  - "!.env.example"
+
+project_name:
+  type: str
+  help: Display name of the assistant
+  default: My Assistant
+
+project_slug:
+  type: str
+  help: Python project name (lowercase, dashes)
+  default: "{{ project_name | lower | replace(' ', '-') }}"
+  validator: "{% if not (project_slug | regex_search('^[a-z][a-z0-9-]*$')) %}lowercase letters, digits and dashes{% endif %}"
+
+description:
+  type: str
+  default: "{{ project_name }}, built on the AI kit"
+
+features:
+  type: str
+  help: Features to turn on (see docs/ROADMAP.md)
+  multiselect: true
+  choices:
+    RAG knowledge base: rag
+    Answer cache with stale-if-error: answer-cache
+    LLM policy rail (scope / jailbreak classifier): guard-llm-rail
+    Reranker (FlashRank): rerank
+    MCP tools: mcp
+    A2A server and remote agents: a2a
+    Deep-research team: deep-research
+  default: [rag]
+
+_tasks:
+  - >-
+    python3 scripts/bootstrap.py --env development --force
+    --name "{{ project_name }}" --slug "{{ project_slug }}" --description "{{ description }}"
+    --features "{{ features | join(',') }}"

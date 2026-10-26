@@ -77,6 +77,18 @@ eval-quick:
 eval-no-report:
 	@$(call run_with_env,python -m evals.main --no-report)
 
+eval-rag:
+	@$(call run_with_env,python -m scripts.eval_rag)
+
+eval-rag-offline:
+	APP_ENV=test uv run python -m scripts.eval_rag --retrieval-only --embedding hashing
+
+ingest:
+	@$(call run_with_env,python -m scripts.ingest $(CORPUS))
+
+test:
+	uv run pytest -q
+
 # ---------------------------------------------------------------------------
 # Code quality
 # ---------------------------------------------------------------------------
@@ -178,6 +190,10 @@ help:
 	@echo "  eval                 Run evals (interactive)"
 	@echo "  eval-quick           Run evals (default settings)"
 	@echo "  eval-no-report       Run evals without report"
+	@echo "  eval-rag             Golden-set eval: retrieval + agent answers graded by EVALUATION_LLM"
+	@echo "  eval-rag-offline     Retrieval-only golden-set eval, no API key (the CI gate)"
+	@echo "  ingest CORPUS=dir    Ingest a folder into the RAG knowledge base"
+	@echo "  test                 Run the test suite"
 	@echo ""
 	@echo "Code quality:"
 	@echo "  lint                 Ruff lint check"
@@ -204,7 +220,7 @@ help:
 	@echo "Misc:"
 	@echo "  clean                Remove .venv, __pycache__, .pytest_cache"
 
-.PHONY: install dev staging prod _serve \
+.PHONY: install dev staging prod _serve eval-rag eval-rag-offline ingest test \
         migrate migration migrate-downgrade migrate-history \
         eval eval-quick eval-no-report \
         lint format typecheck check pre-commit pre-commit-update \

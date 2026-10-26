@@ -190,6 +190,19 @@ def get_structlog_processors(include_file_info: bool = True) -> List[Any]:
     return processors
 
 
+# Third-party loggers kept at WARNING or above even when the app logs at DEBUG.
+NOISY_LIBRARY_LOGGERS = (
+    "pdfminer",
+    "pdfplumber",
+    "PIL",
+    "magika",
+    "httpcore",
+    "urllib3",
+    "huggingface_hub",
+    "deepagents",  # logs a traceback per optional provider it probes for prompt caching
+)
+
+
 def setup_logging() -> None:
     """Configure structlog with different formatters based on environment.
 
@@ -219,6 +232,11 @@ def setup_logging() -> None:
         level=log_level,
         handlers=[file_handler, console_handler],
     )
+
+    # DEBUG on the root logger would also apply to third-party libraries; some
+    # (pdfminer while parsing a PDF) emit megabytes per document.
+    for name in NOISY_LIBRARY_LOGGERS:
+        logging.getLogger(name).setLevel(max(log_level, logging.WARNING))
 
     # Configure structlog based on environment
     if settings.LOG_FORMAT == "console":

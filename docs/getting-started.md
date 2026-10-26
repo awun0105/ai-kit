@@ -16,9 +16,9 @@ The fastest way to get running. One command starts the API and PostgreSQL with p
 git clone <repo-url> my-agent
 cd my-agent
 
-# Copy and fill in your env file
-cp .env.example .env.development
-# Required: OPENAI_API_KEY, JWT_SECRET_KEY
+# Create the env file with a random JWT secret and the features you want
+python3 scripts/bootstrap.py --features rag
+# Required: OPENAI_API_KEY (JWT_SECRET_KEY is already generated)
 # Optional: LANGFUSE_* keys (or set LANGFUSE_TRACING_ENABLED=false)
 
 make install       # installs Python deps + pre-commit hooks
@@ -34,8 +34,8 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs).
 git clone <repo-url> my-agent
 cd my-agent
 
-cp .env.example .env.development
-# Fill in: OPENAI_API_KEY, JWT_SECRET_KEY, POSTGRES_* (point to your DB)
+python3 scripts/bootstrap.py --features rag
+# Fill in: OPENAI_API_KEY, POSTGRES_* (point to your DB)
 
 make install       # installs deps + pre-commit hooks
 make migrate       # creates tables via Alembic
