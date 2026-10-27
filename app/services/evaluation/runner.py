@@ -8,6 +8,7 @@ from datetime import (
 from typing import (
     Any,
     Optional,
+    Sequence,
 )
 
 from langchain_core.messages import (
@@ -26,6 +27,8 @@ from app.services.evaluation.dataset import GoldenItem
 from app.services.evaluation.judge import (
     AnswerGrade,
     AnswerJudge,
+    combine_grades,
+    grade_spread,
 )
 from app.services.evaluation.retrieval import (
     RetrievalScores,
@@ -54,6 +57,7 @@ class AnswerRun(BaseModel):
 
     answer: Optional[str] = None
     grade: Optional[AnswerGrade] = None
+    judge_spread: Optional[int] = Field(default=None, description="Score gap between judge samples (samples > 1)")
     citations_out_of_range: list[int] = Field(default_factory=list)
     refusal_correct: Optional[bool] = None
     tools_called: list[str] = Field(default_factory=list, description="Tool names in call order")
@@ -162,7 +166,10 @@ async def _run_once(graph: Any, item: GoldenItem, judge: Optional[AnswerJudge], 
     run.citations_out_of_range = check_answer(run.answer, source_count).out_of_range if source_count else []
     if judge is not None:
         try:
-            run.grade = await judge.grade(item, run.answer, "\n\n".join(contexts))
+            grades = await judge.grade_samples(item, run.answer, "\n\n".join(contexts))
+            run.grade = combine_grades(grades)
+            if len(grades) > 1:
+                run.judge_spread = grade_spread(grades)
             if item.should_refuse:
                 run.refusal_correct = run.grade.declined
         except Exception as e:
@@ -195,7 +202,7 @@ async def evaluate_answers(
             result.runs.append(await _run_once(graph, item, judge, pass_score))
 
 
-def _mean(values: list[float]) -> float:
+def _mean(values: Sequence[float]) -> float:
     return round(sum(values) / len(values), 3)
 
 
@@ -227,6 +234,9 @@ def summarize_answers(items: list[GoldenItem], results: dict[str, ItemResult]) -
         if graded:
             for metric in ("faithfulness", "correctness", "citation_support"):
                 row[metric] = _mean([getattr(r.grade, metric) for r in graded])
+        spreads = [r.judge_spread for r in rs if r.judge_spread is not None]
+        if spreads:
+            row["judge_spread"] = _mean(spreads)
         if refusals:
             row["refusal_accuracy"] = _mean([bool(r.refusal_correct) for r in refusals])
         if trajectories:

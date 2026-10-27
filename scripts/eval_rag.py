@@ -67,6 +67,7 @@ def _args() -> argparse.Namespace:
     p.add_argument("--max-bad-citations", type=float, default=0.1)
     p.add_argument("--max-error-rate", type=float, default=0.0, help="Share of runs whose agent or judge failed")
     p.add_argument("--runs", type=int, default=1, help="Times the agent answers each question")
+    p.add_argument("--judge-samples", type=int, default=1, help="Grades per answer, combined by median and majority")
     p.add_argument("--pass-score", type=int, default=4, help="Judge score a run needs to pass")
     p.add_argument("--min-trajectory", type=float, default=0.9, help="Share of runs that called the expected tools")
     p.add_argument("--min-pass-rate", type=float, default=0.0, help="Share of runs that passed (0 = no gate)")
@@ -127,7 +128,12 @@ async def main() -> int:
             api_key=settings.EVALUATION_API_KEY,
         )
         await evaluate_answers(
-            graph, items, AnswerJudge(judge_model), results, runs=args.runs, pass_score=args.pass_score
+            graph,
+            items,
+            AnswerJudge(judge_model, samples=args.judge_samples),
+            results,
+            runs=args.runs,
+            pass_score=args.pass_score,
         )
         thresholds |= {
             "answers.faithfulness": args.min_faithfulness,
@@ -151,6 +157,7 @@ async def main() -> int:
         "retrieval_only": args.retrieval_only,
         "runs": 0 if args.retrieval_only else args.runs,
         "judge": None if args.retrieval_only else settings.EVALUATION_LLM,
+        "judge_samples": args.judge_samples,
     }
     report = build_report(str(args.dataset), config, items, results, thresholds)
 

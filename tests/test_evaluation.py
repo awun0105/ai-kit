@@ -22,6 +22,10 @@ from app.services.evaluation import (
     score_retrieval,
     to_markdown,
 )
+from app.services.evaluation.judge import (
+    combine_grades,
+    grade_spread,
+)
 from app.services.evaluation.runner import (
     AnswerRun,
     ItemResult,
@@ -257,3 +261,48 @@ def test_efficiency_gates_are_upper_limits():
         ("answers.mean_tokens", True),
         ("answers.mean_steps", True),
     ]
+
+
+def _grade(faithfulness=5, correctness=5, declined=False, rationale="ok"):
+    return AnswerGrade(
+        faithfulness=faithfulness, correctness=correctness, citation_support=5, declined=declined, rationale=rationale
+    )
+
+
+def test_combined_grade_takes_the_median_and_the_majority():
+    grades = [
+        _grade(5, 4, rationale="a"),
+        _grade(2, 4, declined=True, rationale="outlier"),
+        _grade(4, 5, rationale="b"),
+    ]
+
+    combined = combine_grades(grades)
+
+    assert (combined.faithfulness, combined.correctness, combined.declined) == (4, 4, False)
+    assert combined.rationale == "a"  # the sample closest to the combined scores
+    assert grade_spread(grades) == 3
+    assert combine_grades([_grade(declined=True), _grade(declined=False)]).declined is False  # a tie is not a majority
+
+
+async def test_judge_samples_and_the_report_shows_its_spread(monkeypatch):
+    items = [GoldenItem(id="w", question="Warranty?")]
+
+    async def scripted(messages, *args, **kwargs):
+        return AIMessage(content="24 months.")
+
+    agent = LangGraphAgent()
+    agent.tools_by_name = {}
+    monkeypatch.setattr(agent.llm_service, "call", scripted)
+    graph = await agent.create_graph(checkpointer=InMemorySaver())
+    judge = AnswerJudge(
+        ScriptedModel(replies=[_grade_call(correctness=5), _grade_call(correctness=1), _grade_call(correctness=4)]),
+        samples=3,
+    )
+    results: dict[str, ItemResult] = {}
+
+    await evaluate_answers(graph, items, judge, results)
+    report = build_report("t", {}, items, results, {})
+
+    assert results["w"].runs[0].grade.correctness == 4
+    assert results["w"].runs[0].judge_spread == 4
+    assert report.answers["all"]["judge_spread"] == 4.0

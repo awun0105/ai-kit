@@ -95,6 +95,12 @@ An LLM judge is a measuring instrument; check it before relying on it (D14 and D
   validated object (`AnswerGrade`); there is no free-text parsing.
 - **Position bias.** `AnswerJudge.compare` asks in both orders; a winner that flips with the
   order is returned as `inconsistent` and should not be counted.
+- **Noise.** `--judge-samples 3` grades every answer three times (concurrently) and keeps the
+  median of each score and the majority `declined` (`combine_grades`). The report's
+  `judge_spread` is the mean gap between samples on any score. Measure it before paying for
+  samples: run once with `--judge-samples 3`; a spread near 0 means one sample is enough. Samples
+  only differ when the judge is sampled with a temperature above 0, and each one is a full judge
+  call. Use an odd number: a tie on `declined` counts as not declined.
 - **Agreement with humans.** Label 10–20 answers yourself and compute
   `cohen_kappa(judge_labels, human_labels)`. Below ~0.6 the judge's rubric needs work before
   its scores mean anything.
@@ -186,7 +192,7 @@ EVALUATION_API_KEY=...   # defaults to OPENAI_API_KEY if not set
 |---|---|
 | `app/services/evaluation/dataset.py` | `GoldenItem`, `load_golden` (kit format, JSONL, D14 format) |
 | `app/services/evaluation/retrieval.py` | hit, recall, MRR, nDCG; per-group aggregation |
-| `app/services/evaluation/judge.py` | `AnswerJudge` (rubric grades, pairwise with swap), `cohen_kappa` |
+| `app/services/evaluation/judge.py` | `AnswerJudge` (rubric grades, samples combined by `combine_grades`, pairwise with swap), `cohen_kappa` |
 | `app/services/evaluation/trajectory.py` | `match_trajectory`: expected tool calls, `exact` / `in_order` / `any_order` |
 | `app/services/evaluation/runner.py` | Run retrieval and the agent graph (N runs per item), build the report, apply gates, Markdown |
 | `scripts/eval_rag.py` | CLI |
@@ -212,3 +218,4 @@ It imports the RAG package for retrieval runs and `TurnUsage` from `app/services
 | Judge reliability (swap consistency, Cohen's kappa against human labels) | AI20K D24 Eval-Guard lab, phase B |
 | Base trace evaluator | `evals/` from the base template |
 | Tool trajectory match modes (`exact`, `in_order`, `any_order`); repeated runs with pass rate; tool-call, step and token metrics | Ideas from Google ADK (google/adk-python, commit `2084efb`): `src/google/adk/evaluation/trajectory_evaluator.py`, `_multi_run_aggregation_methods.py`, `_efficiency_evaluators.py`. Rewritten for LangChain messages, no code copied |
+| Several judge samples combined by vote (`combine_grades`) | Idea from Google ADK `src/google/adk/evaluation/rubric_based_evaluator.py` (majority vote per rubric); the kit takes the median of its 1–5 scores. Rewritten |
