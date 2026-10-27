@@ -48,6 +48,7 @@ docker-compose.yml
 # Documentation
 docs/
 README.md
+README_EN.md
 *.md
 
 # Build artifacts
