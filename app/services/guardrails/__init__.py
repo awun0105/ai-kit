@@ -30,6 +30,7 @@ from app.services.guardrails.policy import (
     ToolDecision,
     is_affirmative,
 )
+from app.services.guardrails.tools import guard_tools
 
 _guardrails: Optional[Guardrails] = None
 
@@ -99,6 +100,7 @@ __all__ = [
     "find_injections",
     "find_sensitive",
     "get_guardrails",
+    "guard_tools",
     "is_affirmative",
     "normalize_for_security",
     "redact",

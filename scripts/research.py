@@ -10,6 +10,10 @@ import sys
 
 from app.core.langgraph.tools import tools as builtin_tools
 from app.services.agents import ResilientChatModel
+from app.services.guardrails import (
+    get_guardrails,
+    guard_tools,
+)
 from app.services.agents.research import (
     build_research_agent,
     run_research,
@@ -25,7 +29,7 @@ async def main() -> None:
     parser.add_argument("--max-tool-calls", type=int, default=80)
     args = parser.parse_args()
 
-    sources = [t for t in builtin_tools if t.name != "ask_human"]
+    sources = guard_tools([t for t in builtin_tools if t.name != "ask_human"], get_guardrails())
     agent = build_research_agent(
         ResilientChatModel(service=llm_service), sources, args.max_model_calls, args.max_tool_calls
     )

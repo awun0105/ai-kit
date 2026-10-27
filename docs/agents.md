@@ -43,7 +43,11 @@ APP_ENV=development uv run python -m scripts.research "survey of world models" >
 | `DEEP_RESEARCH_MAX_TOOL_CALLS` | `80` | Tool calls per run, likewise |
 
 Researchers can use any tool the chat agent has: `knowledge_search`, web search, MCP tools,
-`ask_remote_agent`. Their findings pass through the same tool node, so tool output is screened.
+`ask_remote_agent`. They call those tools directly, not through the chat graph's tool node, so
+the app hands them `guard_tools(sources, guard)`: every call is authorized (egress allowlist,
+no secrets in arguments), its output is screened for injected instructions, and a tool listed in
+`GUARD_APPROVAL_TOOLS` is refused, because an autonomous run has nobody to ask. Do the same for
+any agent you build with `create_agent`.
 
 ## Citation checks
 

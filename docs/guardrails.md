@@ -55,6 +55,20 @@ approves (`yes`, `ok`, `đồng ý`, `có`, `duyệt nhé`, `Xác nhận.`, ...)
 All approvals are collected before any tool runs, so a resumed turn never repeats a
 side effect.
 
+## Tools called outside the graph
+
+The rails above live in the chat graph's tool node. A sub-agent (the deep-research team, any
+`create_agent` loop) runs its tools itself, so wrap them first:
+
+```python
+from app.services.guardrails import get_guardrails, guard_tools
+
+agent = create_agent(model, tools=guard_tools(my_tools, get_guardrails()))
+```
+
+Each wrapped tool keeps its name and argument schema; calls are authorized and results
+screened as in the graph, and approval-only tools are refused.
+
 ## Settings
 
 | Variable | Default | Meaning |

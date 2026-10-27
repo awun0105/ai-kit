@@ -31,6 +31,10 @@ from app.core.middleware import (
 )
 from app.core.observability import langfuse_init
 from app.services.database import database_service
+from app.services.guardrails import (
+    get_guardrails,
+    guard_tools,
+)
 from app.services.mcp import build_toolkit_from_settings
 from app.services.memory import memory_service
 
@@ -98,10 +102,13 @@ async def lifespan(app: FastAPI):
             from app.services.agents.research import build_deep_research_tool  # optional "deep" extra
 
             sources = [t for name, t in agent.tools_by_name.items() if name not in ("ask_human", "deep_research")]
+            # Researchers call tools directly, outside the graph's tool node: wrap them in the same rails.
             agent.register_tools(
                 [
                     build_deep_research_tool(
-                        sources, settings.DEEP_RESEARCH_MAX_MODEL_CALLS, settings.DEEP_RESEARCH_MAX_TOOL_CALLS
+                        guard_tools(sources, get_guardrails()),
+                        settings.DEEP_RESEARCH_MAX_MODEL_CALLS,
+                        settings.DEEP_RESEARCH_MAX_TOOL_CALLS,
                     )
                 ]
             )
