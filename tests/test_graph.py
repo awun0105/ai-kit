@@ -7,8 +7,10 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 from app.core.langgraph.graph import LangGraphAgent
+from app.core.langgraph.tools.ask_human import ask_human
 
 
 @tool
@@ -66,3 +68,70 @@ async def test_tool_call_round_trip(monkeypatch):
     assert [m.content for m in tool_messages] == ["5"]
     assert messages[-1].content == "2 + 3 = 5"
     assert len(llm.calls) == 2
+
+
+side_effects: list[str] = []
+
+
+@tool
+def send_email(to: str) -> str:
+    """Send an email."""
+    side_effects.append(to)
+    return "sent"
+
+
+async def test_ask_human_pauses_the_graph_and_resumes_with_the_answer(monkeypatch):
+    agent = LangGraphAgent()
+    agent.tools_by_name = {"ask_human": ask_human}
+    monkeypatch.setattr(
+        agent.llm_service,
+        "call",
+        ScriptedLLM(
+            [
+                AIMessage(
+                    content="", tool_calls=[{"name": "ask_human", "args": {"question": "Which city?"}, "id": "h1"}]
+                ),
+                AIMessage(content="Booked in Hanoi."),
+            ]
+        ),
+    )
+    graph = await agent.create_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "h"}}
+
+    await graph.ainvoke({"messages": [HumanMessage(content="book a room")]}, config)
+    paused = await graph.aget_state(config)
+    assert paused.next == ("tool_call",) and paused.tasks[0].interrupts[0].value == "Which city?"
+
+    state = await graph.ainvoke(Command(resume="Hanoi"), config)
+    answer = next(m for m in state["messages"] if isinstance(m, ToolMessage) and m.name == "ask_human")
+    assert answer.content == "Hanoi"
+
+
+async def test_a_side_effect_next_to_ask_human_runs_once(monkeypatch):
+    side_effects.clear()
+    agent = LangGraphAgent()
+    agent.tools_by_name = {"ask_human": ask_human, "send_email": send_email}
+    monkeypatch.setattr(
+        agent.llm_service,
+        "call",
+        ScriptedLLM(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "send_email", "args": {"to": "a@example.com"}, "id": "e1"},
+                        {"name": "ask_human", "args": {"question": "Anything else?"}, "id": "h1"},
+                    ],
+                ),
+                AIMessage(content="Done."),
+            ]
+        ),
+    )
+    graph = await agent.create_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "h2"}}
+
+    await graph.ainvoke({"messages": [HumanMessage(content="email a then ask me")]}, config)
+    assert side_effects == []  # nothing ran before the human answered
+    await graph.ainvoke(Command(resume="no"), config)
+
+    assert side_effects == ["a@example.com"]  # once, not again on resume

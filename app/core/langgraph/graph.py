@@ -18,7 +18,10 @@ from langchain_core.messages import (
 )
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.errors import GraphInterrupt
+from langgraph.errors import (
+    GraphBubbleUp,
+    GraphInterrupt,
+)
 from langgraph.graph import (
     END,
     StateGraph,
@@ -84,6 +87,9 @@ from app.utils.tasks import create_background_task
 PostgresConnPool = AsyncConnectionPool[AsyncConnection[DictRow]]
 
 NO_MEMORY = "No relevant memory found."
+
+# Tools that call interrupt() to ask the human; run before any other tool of the same turn.
+INTERRUPTING_TOOLS = frozenset({"ask_human"})
 
 
 class LangGraphAgent:
@@ -326,6 +332,8 @@ class LangGraphAgent:
                         # The artifact (e.g. MCP structured content) holds the same untrusted
                         # text; drop it so nothing downstream renders the unscreened copy.
                         artifact = None
+                except GraphBubbleUp:
+                    raise  # interrupt() inside a tool (ask_human, MCP elicitation) must pause the graph
                 except Exception as e:
                     # Report the error to the model instead of retrying the node: a node
                     # retry would re-run every tool in it, repeating side effects.
@@ -338,15 +346,18 @@ class LangGraphAgent:
                 artifact=artifact,
             )
 
-        # Execute tool calls concurrently when multiple are requested
-        if len(tool_calls) == 1:
-            outputs = [await _execute_tool(tool_calls[0], verdicts[0])]
-        else:
-            outputs = list(
-                await asyncio.gather(*[_execute_tool(tc, v) for tc, v in zip(tool_calls, verdicts, strict=True)])
-            )
+        # A tool that pauses for the human re-runs when the graph resumes, and so would every tool
+        # executed next to it. Run those first, one by one; the rest only once they all returned.
+        calls = list(zip(tool_calls, verdicts, strict=True))
+        done: dict[str, ToolMessage] = {}
+        for tool_call, refusal in calls:
+            if tool_call["name"] in INTERRUPTING_TOOLS:
+                done[tool_call["id"]] = await _execute_tool(tool_call, refusal)
+        rest = [(tc, v) for tc, v in calls if tc["id"] not in done]
+        for message in await asyncio.gather(*[_execute_tool(tc, v) for tc, v in rest]):
+            done[message.tool_call_id] = message
 
-        return Command(update={"messages": outputs}, goto="chat")
+        return Command(update={"messages": [done[tc["id"]] for tc in tool_calls]}, goto="chat")
 
     async def create_graph(self, checkpointer: Optional[BaseCheckpointSaver] = None) -> CompiledStateGraph:
         """Create and configure the LangGraph workflow.

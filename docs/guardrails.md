@@ -53,7 +53,10 @@ message. The user's next message resumes the graph. Only a reply that is entirel
 approves (`yes`, `ok`, `đồng ý`, `có`, `duyệt nhé`, `Xác nhận.`, ...); anything else, including
 `có lẽ không` or `ok nhưng đừng`, cancels and the model is told the user declined.
 All approvals are collected before any tool runs, so a resumed turn never repeats a
-side effect.
+side effect. Tools that pause for the human themselves (`ask_human`, listed in
+`INTERRUPTING_TOOLS` in `app/core/langgraph/graph.py`) run before the other tools of the same
+turn, for the same reason: the node re-runs from the start when the graph resumes. Add any
+tool of yours that calls `interrupt()` to that set.
 
 ## Tools called outside the graph
 
