@@ -44,6 +44,7 @@ def _cache(clock, scope="s1", **kw):
         store=store,
         embed=EMBEDDER.embed_query,
         scope=scope,
+        shared=True,
         ttl_s=60,
         max_stale_s=600,
         clock=clock,
@@ -70,8 +71,8 @@ async def test_fresh_then_stale_then_expired():
 async def test_scope_isolation_and_threshold():
     clock = Clock()
     store = InMemoryAnswerStore(clock=clock)
-    old = AnswerCache(store=store, embed=EMBEDDER.embed_query, scope="prompt-v1", clock=clock)
-    new = AnswerCache(store=store, embed=EMBEDDER.embed_query, scope="prompt-v2", clock=clock)
+    old = AnswerCache(store=store, embed=EMBEDDER.embed_query, scope="prompt-v1", shared=True, clock=clock)
+    new = AnswerCache(store=store, embed=EMBEDDER.embed_query, scope="prompt-v2", shared=True, clock=clock)
     await old.store_answer("VPN policy for remote work?", "Use WireGuard [1]", ["vpn.md"])
 
     assert await new.lookup("VPN policy for remote work?") is None
@@ -101,6 +102,19 @@ async def test_same_question_replaces_instead_of_piling_up_and_lru_eviction():
     await cache.store_answer("third subject here", "a3", ["d3"])
 
     assert {e["answer"] for e in cache.store.entries.values()} == {"a1 updated", "a3"}
+
+
+async def test_per_user_cache_keeps_users_apart_and_needs_the_user():
+    clock = Clock()
+    cache = AnswerCache(
+        store=InMemoryAnswerStore(clock=clock), embed=EMBEDDER.embed_query, scope="s", shared=False, clock=clock
+    )
+    await cache.store_answer("leave days", "15, Quân", ["leave.md"], user_id="1")
+
+    assert (await cache.lookup("leave days", user_id="1")).answer == "15, Quân"
+    assert await cache.lookup("leave days", user_id="2") is None
+    with pytest.raises(ValueError, match="user_id"):
+        await cache.lookup("leave days")
 
 
 async def test_invalidation_by_source():
@@ -203,6 +217,51 @@ async def test_answer_is_cached_then_served_without_the_model(monkeypatch, rag_a
     assert [m.role for m in history] == ["user", "assistant"]
 
 
+async def test_a_cached_answer_is_built_without_the_users_name_or_memory(monkeypatch, rag_and_cache):
+    # The first asker's name and memories went into the prompt, so the cached answer could greet
+    # them by name or repeat their facts to everyone who asked the same question afterwards.
+    agent, llm = await _agent(monkeypatch, _rag_turn("Employees get 15 leave days [1]."))
+    seen = []
+    scripted = agent.llm_service.call
+
+    async def recording(messages, *args, **kwargs):
+        seen.append(messages)
+        return await scripted(messages, *args, **kwargs)
+
+    async def memories(user_id, query):
+        return "* User has a dog called Mít"
+
+    monkeypatch.setattr(agent.llm_service, "call", recording)
+    monkeypatch.setattr(memory_service, "search", memories)
+
+    await agent.get_response(
+        [Message(role="user", content="How many leave days do employees get?")],
+        session_id="s-n",
+        user_id="1",
+        username="Quân",
+    )
+
+    system_prompts = [m[0]["content"] for m in seen]
+    assert system_prompts and all("Quân" not in s and "Mít" not in s for s in system_prompts)
+
+
+async def test_turns_outside_the_cache_stay_personalised(monkeypatch, rag_and_cache):
+    set_answer_cache(None)
+    agent, _ = await _agent(monkeypatch, [AIMessage(content="Hi!")])
+    seen = []
+    scripted = agent.llm_service.call
+
+    async def recording(messages, *args, **kwargs):
+        seen.append(messages)
+        return await scripted(messages, *args, **kwargs)
+
+    monkeypatch.setattr(agent.llm_service, "call", recording)
+
+    await agent.get_response([Message(role="user", content="hello")], session_id="s-p", user_id="1", username="Quân")
+
+    assert "Quân" in seen[0][0]["content"]
+
+
 async def test_stale_answer_is_served_when_all_providers_fail(monkeypatch, rag_and_cache):
     cache, clock = rag_and_cache
     await cache.store_answer("How many leave days do employees get?", "15 days [1].", ["leave.md"])
@@ -240,7 +299,7 @@ PG_URL = os.getenv("RAG_TEST_PG_URL")
 async def test_pgvector_answer_store_round_trip():
     table = f"answer_cache_test_{uuid.uuid4().hex[:8]}"
     store = PgVectorAnswerStore(PG_URL, table=table, dimension=128)
-    cache = AnswerCache(store=store, embed=EMBEDDER.embed_query, scope="s")
+    cache = AnswerCache(store=store, embed=EMBEDDER.embed_query, scope="s", shared=True)
     try:
         assert await cache.store_answer("leave days", "15", ["leave.md"])
         assert await cache.store_answer("leave days", "15 (updated)", ["leave.md"])

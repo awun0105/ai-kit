@@ -83,6 +83,8 @@ from app.utils.tasks import create_background_task
 
 PostgresConnPool = AsyncConnectionPool[AsyncConnection[DictRow]]
 
+NO_MEMORY = "No relevant memory found."
+
 
 class LangGraphAgent:
     """Manages the LangGraph Agent/workflow and interactions with the LLM.
@@ -224,9 +226,15 @@ class LangGraphAgent:
             else settings.DEFAULT_LLM_MODEL
         )
 
-        username = config.get("metadata", {}).get("username")
+        metadata = config.get("metadata", {})
+        # An answer bound for the shared answer cache is served to every user: build it from a
+        # prompt that carries no one's name or long-term memory.
+        neutral = bool(metadata.get("neutral_prompt"))
+        username = None if neutral else metadata.get("username")
         thread_id = config.get("configurable", {}).get("thread_id")
-        SYSTEM_PROMPT = load_system_prompt(username=username, long_term_memory=state.long_term_memory)
+        SYSTEM_PROMPT = load_system_prompt(
+            username=username, long_term_memory=NO_MEMORY if neutral else state.long_term_memory
+        )
 
         # Prepare messages with system prompt
         messages = prepare_messages(state.messages, SYSTEM_PROMPT)
@@ -502,6 +510,7 @@ class LangGraphAgent:
             await get_cost_guard().check(user_id or "anonymous")
             question = await self._cache_question(state, messages)
             if question:
+                config["metadata"]["neutral_prompt"] = True  # this answer may be cached for everyone
                 cached = await self._answer_from_cache(graph, config, question, allow_stale=False)
                 if cached is not None:
                     return [Message(role="assistant", content=cached)]
@@ -514,7 +523,7 @@ class LangGraphAgent:
                         config=config,
                     )
                 else:
-                    relevant_memory = relevant_memory or "No relevant memory found."
+                    relevant_memory = relevant_memory or NO_MEMORY
                     response = await graph.ainvoke(
                         input={"messages": dump_messages(messages), "long_term_memory": relevant_memory},
                         config=config,
@@ -594,6 +603,7 @@ class LangGraphAgent:
             await get_cost_guard().check(user_id or "anonymous")
             question = await self._cache_question(state, messages)
             if question:
+                config["metadata"]["neutral_prompt"] = True  # this answer may be cached for everyone
                 cached = await self._answer_from_cache(graph, config, question, allow_stale=False)
                 if cached is not None:
                     yield cached
@@ -603,7 +613,7 @@ class LangGraphAgent:
                 logger.info("resuming_interrupted_graph_stream", session_id=session_id, next_nodes=state.next)
                 graph_input = Command(resume=messages[-1].content)
             else:
-                relevant_memory = relevant_memory or "No relevant memory found."
+                relevant_memory = relevant_memory or NO_MEMORY
                 graph_input = {"messages": dump_messages(messages), "long_term_memory": relevant_memory}
 
             redactor = get_guardrails().stream_redactor()

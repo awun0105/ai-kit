@@ -266,6 +266,8 @@ class AnswerCache:
         store: AnswerStore,
         embed: Callable[[str], Awaitable[list[float]]],
         scope: str,
+        *,
+        shared: bool,
         similarity_threshold: float = 0.92,
         ttl_s: float = 3600.0,
         max_stale_s: float = 86400.0,
@@ -278,6 +280,10 @@ class AnswerCache:
             store: Where entries live.
             embed: Async function returning the embedding of a question.
             scope: Version key; entries from another scope are never served.
+            shared: True serves one user's cached answer to every user. That is only safe
+                when the answer was produced from a prompt carrying no user's name or
+                memory (the app's graph uses a neutral prompt on cache-eligible turns).
+                False keeps a separate cache per ``user_id``, which every call must pass.
             similarity_threshold: Minimum cosine similarity for a hit. Keep it high:
                 a wrong cached answer is worse than a cache miss.
             ttl_s: Age until which a hit is fresh.
@@ -288,6 +294,7 @@ class AnswerCache:
         self.store = store
         self._embed = embed
         self.scope = scope
+        self.shared = shared
         self.similarity_threshold = similarity_threshold
         self.ttl_s = ttl_s
         self.max_stale_s = max_stale_s
@@ -298,13 +305,23 @@ class AnswerCache:
         """Personal questions are never cached nor served from cache."""
         return bool(question.strip()) and not self._personal.search(question)
 
-    async def lookup(self, question: str, allow_stale: bool = False) -> Optional[CacheHit]:
+    def _scope_for(self, user_id: Optional[str]) -> str:
+        if self.shared:
+            return self.scope
+        if not user_id:
+            raise ValueError("a per-user answer cache (shared=False) needs the user_id of every call")
+        return scope_key(self.scope, user_id)
+
+    async def lookup(
+        self, question: str, allow_stale: bool = False, user_id: Optional[str] = None
+    ) -> Optional[CacheHit]:
         """Return a hit for ``question``; stale hits only when ``allow_stale``."""
+        scope = self._scope_for(user_id)
         if not self.is_cacheable(question):
             return None
         try:
             embedding = await self._embed(question)
-            match = await self.store.nearest(self.scope, embedding)
+            match = await self.store.nearest(scope, embedding)
         except Exception as e:
             logger.warning("answer_cache_lookup_failed", error=str(e))
             return None
@@ -320,13 +337,16 @@ class AnswerCache:
             answer=entry["answer"], similarity=similarity, age_s=age, fresh=fresh, sources=entry["sources"]
         )
 
-    async def store_answer(self, question: str, answer: str, sources: list[str]) -> bool:
+    async def store_answer(
+        self, question: str, answer: str, sources: list[str], user_id: Optional[str] = None
+    ) -> bool:
         """Remember an answer built from ``sources``; returns whether it was stored."""
+        scope = self._scope_for(user_id)
         if not (self.is_cacheable(question) and answer.strip() and sources):
             return False
         try:
             embedding = await self._embed(question)
-            await self.store.upsert(self.scope, question, embedding, answer, sorted(set(sources)))
+            await self.store.upsert(scope, question, embedding, answer, sorted(set(sources)))
             return True
         except Exception as e:
             logger.warning("answer_cache_store_failed", error=str(e))
@@ -380,6 +400,8 @@ def build_answer_cache_from_settings() -> Optional[AnswerCache]:
             settings.RAG_EMBEDDING_MODEL,
             settings.ANSWER_CACHE_VERSION,
         ),
+        # Safe because the graph answers cache-eligible turns from a neutral prompt (no name, no memory).
+        shared=True,
         similarity_threshold=settings.ANSWER_CACHE_THRESHOLD,
         ttl_s=settings.ANSWER_CACHE_TTL_S,
         max_stale_s=settings.ANSWER_CACHE_MAX_STALE_S,

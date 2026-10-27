@@ -46,6 +46,11 @@ Off by default (`ANSWER_CACHE_ENABLED=false`); needs `RAG_ENABLED=true`.
   depend on context.
 - Never for **personal questions** ("my balance", "đơn hàng của tôi"), nor when the input
   rails found PII.
+- A cached answer is served to **every user**, so a cache-eligible turn is answered from a
+  **neutral prompt**: no username and no long-term memory, otherwise the first asker's name or
+  facts would reach everyone who asks the same question. `AnswerCache(shared=True)` states that
+  assumption; `shared=False` keeps a separate cache per `user_id` for apps whose answers must
+  stay personalised.
 - Only answers that used `knowledge_search` are stored, with the ids of the documents
   they came from. Re-ingesting a changed document deletes every answer built on it
   (`scripts/ingest.py` does this automatically).
