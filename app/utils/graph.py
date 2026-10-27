@@ -1,6 +1,9 @@
 """This file contains the graph utilities for the application."""
 
-from typing import cast
+from typing import (
+    Optional,
+    cast,
+)
 
 import tiktoken
 from langchain_core.messages import (
@@ -118,22 +121,36 @@ def process_llm_response(response: BaseMessage) -> BaseMessage:
     return response
 
 
-def prepare_messages(messages: list[Message], system_prompt: str) -> list[Message]:
-    """Prepare the messages for the LLM.
+def _current_turn(messages: list) -> list:
+    """The messages from the latest user message to the end (the question and its tool round trips)."""
+    for index in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[index], HumanMessage):
+            return messages[index:]
+    return messages
+
+
+def prepare_messages(messages: list[Message], system_prompt: str, max_tokens: Optional[int] = None) -> list[Message]:
+    """Prepare the messages for the LLM: the system prompt, then as much recent history as fits.
+
+    History is cut at user messages, oldest turn first, so a tool result never loses the
+    call that produced it. The current turn is always kept whole, even when it alone is
+    over the budget (a large RAG result): dropping it would send the model no question.
 
     Args:
         messages (list[Message]): The messages to prepare.
         system_prompt (str): The system prompt to use.
+        max_tokens (Optional[int]): History budget in tokens; defaults to ``HISTORY_MAX_TOKENS``.
 
     Returns:
         list[Message]: The prepared messages.
     """
+    budget = settings.HISTORY_MAX_TOKENS if max_tokens is None else max_tokens
     try:
         trimmed_messages = _trim_messages(
             dump_messages(messages),
             strategy="last",
             token_counter=_count_tokens_tiktoken,
-            max_tokens=settings.MAX_TOKENS,
+            max_tokens=budget,
             start_on="human",
             include_system=False,
             allow_partial=False,
@@ -150,6 +167,13 @@ def prepare_messages(messages: list[Message], system_prompt: str) -> list[Messag
             trimmed_messages = messages
         else:
             raise
+    if messages and not trimmed_messages:
+        trimmed_messages = _current_turn(messages)
+        logger.warning(
+            "history_current_turn_over_budget",
+            max_tokens=budget,
+            turn_tokens=_count_tokens_tiktoken(trimmed_messages),
+        )
 
     # langchain-core >= 1.6 types trim_messages() as returning BaseMessage;
     # cast back to the declared return type to keep pyright passing.

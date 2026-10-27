@@ -163,7 +163,9 @@ class Settings:
         self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-5.6-luna")
         self.SESSION_NAMING_ENABLED = os.getenv("SESSION_NAMING_ENABLED", "true").lower() == "true"
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
-        self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
+        self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))  # per model reply
+        # Conversation history sent with each call; the current turn is always sent whole.
+        self.HISTORY_MAX_TOKENS = int(os.getenv("HISTORY_MAX_TOKENS", "16000"))
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "2"))
         # Must fit MAX_LLM_CALL_RETRIES x LLM_ATTEMPT_TIMEOUT plus one fallback attempt (checked at startup).
         self.LLM_TOTAL_TIMEOUT = float(os.getenv("LLM_TOTAL_TIMEOUT", "90"))
