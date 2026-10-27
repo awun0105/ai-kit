@@ -19,6 +19,7 @@ from app.services.a2a.server import (  # noqa: E402
     agent_ask,
     build_a2a_app,
     build_agent_card,
+    parse_caller_tokens,
 )
 from app.services.guardrails import (  # noqa: E402
     Guardrails,
@@ -89,6 +90,64 @@ async def test_tool_approval_surfaces_as_input_required(served):
     answer = await ask_remote_agent_raw(BASE, "refund A1", token=TOKEN, http_client=http)
 
     assert "Approval needed" in answer and "refund" in answer
+
+
+async def test_each_token_names_its_caller():
+    asked = []
+
+    async def ask(caller, context_id, text):
+        asked.append(caller)
+        return "ok", False
+
+    card = build_agent_card("Kit", "d", f"{BASE}/", [{"id": "chat", "name": "Chat", "description": "d"}])
+    app = build_a2a_app(card, ask, callers={"billing": "tok-billing", "crm": "tok-crm"})
+    http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE)
+    try:
+        wrong = await http.post(
+            "/",
+            json={"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {}},
+            headers={"Authorization": "Bearer nope"},
+        )
+        answer = await ask_remote_agent_raw(BASE, "hi", token="tok-crm", http_client=http)  # closes the client
+    finally:
+        await http.aclose()
+
+    assert answer == "ok" and asked == ["crm"]
+    assert wrong.status_code == 401
+
+
+async def test_callers_reusing_a_context_id_get_separate_conversations(monkeypatch):
+    # The context id is chosen by the remote side; as the whole thread id it let one caller
+    # continue (and read) another caller's conversation.
+    async def no_memory(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(memory_service, "search", no_memory)
+    monkeypatch.setattr(memory_service, "add", no_memory)
+    agent = LangGraphAgent()
+    replies = [AIMessage(content="noted for billing"), AIMessage(content="noted for crm")]
+
+    async def scripted(messages, *args, **kwargs):
+        return replies.pop(0)
+
+    monkeypatch.setattr(agent.llm_service, "call", scripted)
+    agent._graph = await agent.create_graph(checkpointer=InMemorySaver())
+    ask = agent_ask(agent)
+
+    await ask("billing", "ctx-1", "invoice 42 is disputed")
+    await ask("crm", "ctx-1", "hello")
+
+    crm_history = [m.content for m in await agent.get_chat_history("a2a-crm-ctx-1")]
+    assert "invoice 42 is disputed" not in crm_history
+    assert crm_history == ["hello", "noted for crm"]
+
+
+def test_caller_tokens_are_validated():
+    assert parse_caller_tokens(["billing=t1", "crm=t2"]) == {"billing": "t1", "crm": "t2"}
+    with pytest.raises(ValueError):
+        parse_caller_tokens(["billing"])
+    with pytest.raises(ValueError):
+        parse_caller_tokens(["a=same", "b=same"])
 
 
 def test_remote_agent_config_is_validated():

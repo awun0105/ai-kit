@@ -65,15 +65,19 @@ Install the extra (`uv sync --extra a2a`) and set:
 
 ```bash
 A2A_ENABLED=true
-A2A_SERVER_TOKEN=...                               # required; the endpoint runs the agent with its tools
+A2A_SERVER_TOKENS=billing=tok-1,crm=tok-2         # one token per calling agent (or A2A_SERVER_TOKEN for one)
 A2A_PUBLIC_URL=https://agent.example.com/a2a       # advertised in the agent card
 A2A_AGENT_DESCRIPTION="Answers HR policy questions."
 ```
 
 - A2A protocol 1.0, JSON-RPC binding, official `a2a-sdk`.
 - Agent card (public): `GET /a2a/.well-known/agent-card.json`. JSON-RPC: `POST /a2a/` with
-  `Authorization: Bearer <A2A_SERVER_TOKEN>`.
-- The A2A `context_id` is the LangGraph thread, so remote callers get multi-turn memory.
+  `Authorization: Bearer <token>`. At least one of `A2A_SERVER_TOKEN` (the caller `default`) or
+  `A2A_SERVER_TOKENS` is required: the endpoint runs the agent with its tools.
+- Each token names a caller. The thread id is `a2a-<caller>-<context_id>`, so a caller gets
+  multi-turn memory but can never continue another caller's conversation by reusing its
+  context id (the remote side chooses it). The user id is `a2a:<caller>`: long-term memory and
+  the cost budget are per caller.
 - When a tool needs approval the task ends in `input-required` with the approval question;
   answering in the same context resumes it.
 

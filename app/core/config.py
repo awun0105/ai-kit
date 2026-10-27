@@ -211,6 +211,8 @@ class Settings:
         # A2A (see docs/tools.md); needs `uv sync --extra a2a`
         self.A2A_ENABLED = os.getenv("A2A_ENABLED", "false").lower() in ("true", "1", "t", "yes")
         self.A2A_SERVER_TOKEN = os.getenv("A2A_SERVER_TOKEN", "")
+        # One token per calling agent, as caller=token pairs; each caller gets its own threads and budget
+        self.A2A_SERVER_TOKENS = parse_list_from_env("A2A_SERVER_TOKENS")
         self.A2A_PUBLIC_URL = os.getenv("A2A_PUBLIC_URL", "http://localhost:8000/a2a")
         self.A2A_AGENT_DESCRIPTION = os.getenv(
             "A2A_AGENT_DESCRIPTION", "Answers questions using the organisation's knowledge base and tools."

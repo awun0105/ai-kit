@@ -206,6 +206,7 @@ if settings.A2A_ENABLED:
         agent_ask,
         build_a2a_app,
         build_agent_card,
+        parse_caller_tokens,
     )
 
     app.mount(
@@ -226,6 +227,7 @@ if settings.A2A_ENABLED:
             ),
             agent_ask(agent),
             token=settings.A2A_SERVER_TOKEN,
+            callers=parse_caller_tokens(settings.A2A_SERVER_TOKENS),
         ),
     )
 
