@@ -5,8 +5,8 @@
 ```
 pull request ──> CI: ruff, pyright, pytest (+ pgvector service, offline retrieval gate), promtool alert tests
                  eval.yml (label "run-eval"): golden-set evaluation with real models, report in the run summary
-merge to master ──> CI ──success──> Release image: build, push ghcr.io/<repo>:sha-<commit> and :production,
-                                    SBOM + provenance, Trivy scan (fails on fixable critical CVEs)
+merge to master ──> CI ──success──> Release image: build, Trivy scan (fails on fixable critical CVEs),
+                                    then push ghcr.io/<repo>:sha-<commit> and :production with SBOM + provenance
 nightly ──> eval.yml: full golden-set evaluation, fails when a gate fails
 ```
 

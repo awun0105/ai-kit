@@ -38,24 +38,39 @@ jobs:
             type=sha,format=long
             type=raw,value=production
 
-      - uses: docker/build-push-action@v6
+      # Build once into the runner's Docker and scan it: nothing reaches the registry
+      # (or moves :production) unless the scan passes.
+      - name: Build for scanning
+        uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          load: true
+          push: false
+          tags: release-candidate:scan
           # Optional features baked into the image, e.g. "rerank a2a deep" (repository variable).
           build-args: |
             EXTRAS=${{ vars.IMAGE_EXTRAS }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: true
-          sbom: true
 
       - name: Scan for fixable critical vulnerabilities
         uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          image-ref: release-candidate:scan
           severity: CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+
+      # Same inputs and cache, so this reuses the scanned layers and adds SBOM + provenance.
+      - name: Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            EXTRAS=${{ vars.IMAGE_EXTRAS }}
+          cache-from: type=gha
+          provenance: true
+          sbom: true

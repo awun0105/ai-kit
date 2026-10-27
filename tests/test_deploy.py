@@ -1,8 +1,10 @@
 """Deployment concerns: cost guard, error responses that do not leak internals."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from langchain_core.messages import (
     AIMessage,
@@ -215,3 +217,15 @@ def test_request_metrics_use_route_templates_not_raw_paths():
     assert "/api/v1/auth/session/{session_id}/name" in labels
     assert not any("abc123" in label or "zzz999" in label for label in labels)
     assert "unmatched" in labels
+
+
+def test_release_scans_the_image_before_pushing_it():
+    # Scanning after the push published the image (and moved :production) even when Trivy failed.
+    workflow = yaml.safe_load((Path(__file__).resolve().parent.parent / ".github/workflows/deploy.yaml").read_text())
+    steps = workflow["jobs"]["image"]["steps"]
+    uses = [step.get("uses", "") for step in steps]
+
+    scan = next(i for i, u in enumerate(uses) if u.startswith("aquasecurity/trivy-action"))
+    pushes = [i for i, step in enumerate(steps) if step.get("with", {}).get("push") is True]
+
+    assert pushes and all(scan < i for i in pushes)
