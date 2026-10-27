@@ -49,8 +49,8 @@ APP_ENV=development uv run python -m scripts.ingest path/to/corpus --prune
 | Variable | Default | Meaning |
 |---|---|---|
 | `RAG_ENABLED` | `false` | Register the `knowledge_search` tool |
-| `RAG_VECTOR_STORE` | `pgvector` | `pgvector` (table `RAG_TABLE` in the app database) or `memory` |
-| `RAG_EMBEDDING_PROVIDER` | `openai` | `openai` = any OpenAI-compatible endpoint; `hashing` = offline, no semantics, tests only |
+| `RAG_VECTOR_STORE` | `pgvector` | `pgvector` (table `RAG_TABLE` in the app database), `sqlite` (one local file, `RAG_SQLITE_PATH`; [offline](offline.md)) or `memory` |
+| `RAG_EMBEDDING_PROVIDER` | `openai` | `openai` = any OpenAI-compatible endpoint (Ollama included); `fastembed` = in-process on the CPU ([offline](offline.md)); `hashing` = no semantics, tests only |
 | `RAG_EMBEDDING_MODEL` / `RAG_EMBEDDING_DIM` | `text-embedding-3-small` / `1536` | Changing either needs a new `RAG_TABLE` |
 | `RAG_EMBEDDING_BASE_URL` / `RAG_EMBEDDING_API_KEY` | – / `OPENAI_API_KEY` | Non-OpenAI embedding endpoint |
 | `RAG_CHUNK_SIZE` / `RAG_CHUNK_OVERLAP` | `500` / `50` | Characters |

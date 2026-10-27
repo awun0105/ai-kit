@@ -1,5 +1,6 @@
 """LLM model registry with pre-initialized instances."""
 
+import json
 from typing import (
     Any,
     Dict,
@@ -54,6 +55,28 @@ def _build_llm(model: str, **kwargs: Any) -> BaseChatModel:
     return init_chat_model(model, **kwargs)
 
 
+def parse_model_configs(raw: str) -> List[Dict[str, Any]]:
+    """Parse ``LLM_MODELS_JSON``: a non-empty JSON list of ``{"name", "model", "kwargs"?, "supports_tools"?}``.
+
+    Example, a local model through Ollama or llama.cpp's OpenAI-compatible server:
+    ``[{"name": "local", "model": "ollama:qwen3:8b"}]`` or
+    ``[{"name": "local", "model": "openai:qwen3", "kwargs": {"base_url": "http://127.0.0.1:8080/v1", "api_key": "none"}}]``.
+    """
+    configs = json.loads(raw)
+    if not isinstance(configs, list) or not configs:
+        raise ValueError("LLM_MODELS_JSON must be a non-empty JSON list")
+    names: set[str] = set()
+    for config in configs:
+        if not isinstance(config, dict) or not config.get("name") or not config.get("model"):
+            raise ValueError("every LLM_MODELS_JSON entry needs a name and a model")
+        if config["name"] in names:
+            raise ValueError(f"LLM_MODELS_JSON lists {config['name']!r} twice")
+        names.add(config["name"])
+        if not isinstance(config.get("kwargs", {}), dict):
+            raise ValueError(f"kwargs of {config['name']!r} must be an object")
+    return configs
+
+
 class LLMRegistry:
     """Registry of available LLM models with pre-initialized instances.
 
@@ -101,6 +124,9 @@ class LLMRegistry:
             },
         },
     ]
+
+    if settings.LLM_MODELS_JSON.strip():
+        LLM_CONFIGS = parse_model_configs(settings.LLM_MODELS_JSON)
 
     LLMS: List[Dict[str, Any]] = [
         {"name": config["name"], "llm": _build_llm(config["model"], **config.get("kwargs", {}))}

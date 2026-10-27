@@ -66,7 +66,7 @@ class MemoryService:
         no user_id is supplied (anonymous sessions skip long-term memory
         rather than pooling under a shared partition).
         """
-        if user_id is None:
+        if user_id is None or not settings.LONG_TERM_MEMORY_ENABLED:
             return ""
         try:
             # Check cache first
@@ -98,7 +98,7 @@ class MemoryService:
         them, producing noisy facts. No-op when ``user_id`` is ``None`` (see
         ``search`` for rationale).
         """
-        if user_id is None:
+        if user_id is None or not settings.LONG_TERM_MEMORY_ENABLED:
             return
         user_text = latest_user_text(messages).strip()
         if not user_text:

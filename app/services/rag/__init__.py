@@ -8,6 +8,7 @@ from app.services.rag.contracts import (
 )
 from app.services.rag.embeddings import (
     Embedder,
+    FastEmbedEmbedder,
     HashingEmbedder,
     OpenAIEmbedder,
 )
@@ -25,15 +26,18 @@ from app.services.rag.store import (
     PgVectorStore,
     VectorStore,
 )
+from app.services.rag.sqlite_store import SQLiteVectorStore
 
 __all__ = [
     "Chunk",
     "Document",
     "Embedder",
+    "FastEmbedEmbedder",
     "HashingEmbedder",
     "InMemoryVectorStore",
     "OpenAIEmbedder",
     "PgVectorStore",
+    "SQLiteVectorStore",
     "RAGPipeline",
     "Reranker",
     "RerankersReranker",

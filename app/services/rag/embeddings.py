@@ -7,6 +7,7 @@ hashing embedder needs no network and exists for tests and offline demos;
 its vectors carry no semantics.
 """
 
+import asyncio
 import hashlib
 import math
 import re
@@ -52,6 +53,41 @@ class OpenAIEmbedder:
     async def embed_query(self, text: str) -> list[float]:
         """Embed a search query."""
         return await self._client.aembed_query(text)
+
+
+class FastEmbedEmbedder:
+    """Embeddings computed in-process on the CPU with FastEmbed (ONNX): no server, no API key.
+
+    The model is downloaded once to ``cache_dir`` on first use; after that it runs offline.
+    ``sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`` (384 dimensions,
+    about 0.2 GB) covers Vietnamese; ``intfloat/multilingual-e5-large`` (1024) is more
+    accurate and about ten times larger.
+    """
+
+    def __init__(self, model: str, dimension: int, cache_dir: str | None = None):
+        """Load ``model``; ``dimension`` must match its output size."""
+        # fastembed is the optional "offline" extra; importing it here keeps the core app importable without it.
+        from fastembed import TextEmbedding
+
+        self.dimension = dimension
+        self._model = TextEmbedding(model_name=model, cache_dir=cache_dir)
+
+    def _check(self, vectors: list[list[float]]) -> list[list[float]]:
+        if vectors and len(vectors[0]) != self.dimension:
+            raise ValueError(f"embedding model returns {len(vectors[0])} dimensions, configured {self.dimension}")
+        return vectors
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Embed passages for indexing (on a worker thread: inference is CPU-bound)."""
+        if not texts:
+            return []
+        vectors = await asyncio.to_thread(lambda: [[float(x) for x in v] for v in self._model.passage_embed(texts)])
+        return self._check(vectors)
+
+    async def embed_query(self, text: str) -> list[float]:
+        """Embed a search query."""
+        vectors = await asyncio.to_thread(lambda: [[float(x) for x in v] for v in self._model.query_embed(text)])
+        return self._check(vectors)[0]
 
 
 class HashingEmbedder:

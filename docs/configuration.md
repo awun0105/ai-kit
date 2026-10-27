@@ -32,6 +32,9 @@ cp .env.example .env.development
 | `DEFAULT_LLM_MODEL` | `gpt-5-mini` | No | Starting model — see [LLM Service](llm-service.md) for fallback order |
 | `DEFAULT_LLM_TEMPERATURE` | `0.2` | No | Temperature for chat completions |
 | `MAX_TOKENS` | `2000` | No | Max tokens per LLM response |
+| `LLM_MODELS_JSON` | `""` | No | Replaces the built-in model list: a JSON list of `{"name", "model", "kwargs"}`, e.g. a local Ollama or llama.cpp model ([offline](offline.md)) |
+| `CHECKPOINT_BACKEND` | `postgres` | No | `sqlite` keeps conversations in one local file (`CHECKPOINT_SQLITE_PATH`, default `data/checkpoints.sqlite`) |
+| `LONG_TERM_MEMORY_ENABLED` | `true` | No | Turn mem0 off, e.g. offline |
 | `HISTORY_MAX_TOKENS` | `16000` | No | Conversation history sent with each call, oldest turns dropped first; the current turn (question plus tool results) is always sent whole |
 | `HISTORY_COMPACTION_ENABLED` | `false` | No | Summarize the oldest turns instead of dropping them ([compaction](compaction.md)) |
 | `HISTORY_COMPACTION_TRIGGER_TOKENS` | `12000` | No | Unsummarized history size that triggers a summary; at most `HISTORY_MAX_TOKENS` |

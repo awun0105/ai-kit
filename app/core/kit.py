@@ -8,6 +8,7 @@ This module is the one place that reads the ``RAG_*``, ``GUARD_*``, ``ANSWER_CAC
 process-wide instances. Tests replace an instance with the matching ``set_*``.
 """
 
+from pathlib import Path
 from typing import (
     Literal,
     Optional,
@@ -16,6 +17,7 @@ from typing import (
 )
 from urllib.parse import quote_plus
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.constants import TAG_NOSTREAM
 
 from app.core.cache import cache_service
@@ -42,6 +44,7 @@ from app.services.mcp import (
 )
 from app.services.rag import (
     Embedder,
+    FastEmbedEmbedder,
     HashingEmbedder,
     InMemoryVectorStore,
     OpenAIEmbedder,
@@ -49,6 +52,7 @@ from app.services.rag import (
     RAGPipeline,
     Reranker,
     RerankersReranker,
+    SQLiteVectorStore,
     TokenizerMode,
     VectorStore,
 )
@@ -81,6 +85,10 @@ def build_pipeline_from_settings() -> RAGPipeline:
     embedder: Embedder
     if settings.RAG_EMBEDDING_PROVIDER == "hashing":
         embedder = HashingEmbedder(settings.RAG_EMBEDDING_DIM)
+    elif settings.RAG_EMBEDDING_PROVIDER == "fastembed":
+        embedder = FastEmbedEmbedder(
+            settings.RAG_EMBEDDING_MODEL, settings.RAG_EMBEDDING_DIM, settings.RAG_EMBEDDING_CACHE_DIR or None
+        )
     else:
         embedder = OpenAIEmbedder(
             model=settings.RAG_EMBEDDING_MODEL,
@@ -92,6 +100,8 @@ def build_pipeline_from_settings() -> RAGPipeline:
     store: VectorStore
     if settings.RAG_VECTOR_STORE == "memory":
         store = InMemoryVectorStore()
+    elif settings.RAG_VECTOR_STORE == "sqlite":
+        store = SQLiteVectorStore(settings.RAG_SQLITE_PATH, settings.RAG_EMBEDDING_DIM)
     else:
         store = PgVectorStore.from_settings(
             host=settings.POSTGRES_HOST,
@@ -248,6 +258,31 @@ def set_answer_cache(cache: Optional[AnswerCache]) -> None:
     """Replace the process-wide answer cache (used by tests)."""
     global _answer_cache, _answer_cache_built
     _answer_cache, _answer_cache_built = cache, True
+
+
+# ---------------------------------------------------------------- checkpointer
+
+
+async def build_checkpointer_from_settings() -> Optional[BaseCheckpointSaver]:
+    """The SQLite checkpointer when ``CHECKPOINT_BACKEND=sqlite``; None means the graph uses Postgres.
+
+    SQLite keeps every conversation in one local file: right for an app on the user's
+    machine, wrong for a server with many concurrent writers.
+    """
+    backend = settings.CHECKPOINT_BACKEND
+    if backend == "postgres":
+        return None
+    if backend != "sqlite":
+        raise ValueError(f"CHECKPOINT_BACKEND must be postgres or sqlite, got {backend!r}")
+    # langgraph-checkpoint-sqlite is the optional "offline" extra; imported only when chosen.
+    import aiosqlite
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    path = Path(settings.CHECKPOINT_SQLITE_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    saver = AsyncSqliteSaver(await aiosqlite.connect(str(path)))
+    await saver.setup()
+    return saver
 
 
 # ---------------------------------------------------------------- history compaction

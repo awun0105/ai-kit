@@ -75,6 +75,13 @@ a2a = [
 deep = [
     "deepagents>=0.7.32",
 ]
+acp = [
+    "agent-client-protocol>=0.12.1",
+]
+offline = [
+    "fastembed>=0.9.1",
+    "langgraph-checkpoint-sqlite>=3.1.2",
+]
 
 [dependency-groups]
 dev = [

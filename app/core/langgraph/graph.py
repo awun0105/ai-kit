@@ -49,6 +49,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import settings
 from app.core.kit import (
+    build_checkpointer_from_settings,
     get_answer_cache,
     get_cost_guard,
     get_guardrails,
@@ -399,6 +400,8 @@ class LangGraphAgent:
                 graph_builder.set_entry_point("input_guard")
                 graph_builder.set_finish_point("chat")
 
+                if checkpointer is None:
+                    checkpointer = await build_checkpointer_from_settings()
                 if checkpointer is None:
                     # Raises if the pool cannot be created — no checkpointer, no service.
                     connection_pool = await self._get_connection_pool()

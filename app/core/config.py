@@ -161,6 +161,12 @@ class Settings:
         # LangGraph Configuration
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
         self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-5.6-luna")
+        # Replaces the built-in model list (registry.py) when set: a JSON list of
+        # {"name", "model", "kwargs"}, e.g. a local Ollama or llama.cpp model (docs/offline.md).
+        self.LLM_MODELS_JSON = os.getenv("LLM_MODELS_JSON", "")
+        # Where LangGraph keeps conversations: "postgres" (the server default) or "sqlite" (one file, one user).
+        self.CHECKPOINT_BACKEND = os.getenv("CHECKPOINT_BACKEND", "postgres")
+        self.CHECKPOINT_SQLITE_PATH = os.getenv("CHECKPOINT_SQLITE_PATH", "data/checkpoints.sqlite")
         self.SESSION_NAMING_ENABLED = os.getenv("SESSION_NAMING_ENABLED", "true").lower() == "true"
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
         self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))  # per model reply
@@ -190,14 +196,19 @@ class Settings:
         self.LLM_BREAKER_HALF_OPEN_PROBES = int(os.getenv("LLM_BREAKER_HALF_OPEN_PROBES", "2"))
 
         # Long term memory Configuration
+        # mem0 calls an LLM and an embedding API on every turn; turn it off when running offline.
+        self.LONG_TERM_MEMORY_ENABLED = os.getenv("LONG_TERM_MEMORY_ENABLED", "true").lower() == "true"
         self.LONG_TERM_MEMORY_MODEL = os.getenv("LONG_TERM_MEMORY_MODEL", "gpt-5-nano")
         self.LONG_TERM_MEMORY_EMBEDDER_MODEL = os.getenv("LONG_TERM_MEMORY_EMBEDDER_MODEL", "text-embedding-3-small")
         self.LONG_TERM_MEMORY_COLLECTION_NAME = os.getenv("LONG_TERM_MEMORY_COLLECTION_NAME", "longterm_memory")
         # RAG Configuration (the knowledge_search tool is registered only when enabled)
         self.RAG_ENABLED = os.getenv("RAG_ENABLED", "false").lower() in ("true", "1", "t", "yes")
-        self.RAG_VECTOR_STORE = os.getenv("RAG_VECTOR_STORE", "pgvector")  # "pgvector" or "memory"
+        self.RAG_VECTOR_STORE = os.getenv("RAG_VECTOR_STORE", "pgvector")  # "pgvector", "sqlite" or "memory"
+        self.RAG_SQLITE_PATH = os.getenv("RAG_SQLITE_PATH", "data/knowledge.sqlite")
         self.RAG_TABLE = os.getenv("RAG_TABLE", "rag_chunks")
-        self.RAG_EMBEDDING_PROVIDER = os.getenv("RAG_EMBEDDING_PROVIDER", "openai")  # "openai" or "hashing"
+        # "openai" (any OpenAI-compatible endpoint, Ollama included), "fastembed" (in-process) or "hashing"
+        self.RAG_EMBEDDING_PROVIDER = os.getenv("RAG_EMBEDDING_PROVIDER", "openai")
+        self.RAG_EMBEDDING_CACHE_DIR = os.getenv("RAG_EMBEDDING_CACHE_DIR", "")  # fastembed model files
         self.RAG_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "text-embedding-3-small")
         self.RAG_EMBEDDING_DIM = int(os.getenv("RAG_EMBEDDING_DIM", "1536"))
         self.RAG_EMBEDDING_BASE_URL = os.getenv("RAG_EMBEDDING_BASE_URL", "")
