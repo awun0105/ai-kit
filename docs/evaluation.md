@@ -85,6 +85,44 @@ Answers come from the **real agent graph** (input guard, tools, output rail), wi
 checkpointer and a throwaway copy of the corpus, so no Postgres is needed and production data
 is untouched. A different failure in any layer shows up in the score.
 
+### Simulated conversations
+
+A golden item is one question on a fresh thread. Real users ask follow-ups, answer the agent's
+questions and approve actions. `--scenarios` adds multi-turn conversations: a model plays the
+user from a scenario, the agent answers through the real graph on **one** thread, and a judge
+decides whether the conversation met the scenario's success criteria.
+
+```json
+{"id": "S01-warranty-follow-up",
+ "persona": "A customer who bought a NovaBook 14 eight months ago. Writes short, informal messages.",
+ "goal": "Find out whether the laptop is still under warranty, and what to do because its screen flickers.",
+ "opening": "Is my NovaBook 14 still under warranty?",
+ "success_criteria": "The assistant says the warranty length from the policy, ...",
+ "max_turns": 5}
+```
+
+- The **opening** message is fixed; later user messages come from the simulator
+  (`UserSimulator`), which returns `{done, message}` as structured output.
+- When the graph pauses (`ask_human`, a tool approval), the simulated reply resumes it with
+  `Command(resume=...)`, so human-in-the-loop flows are tested as well.
+- The conversation stops when the simulator says it is done (`user_done`), at `max_turns` agent
+  replies (`turn_limit`, so the two models cannot loop forever), or on an error. The simulator is
+  asked once more at the limit, so a goal met on the last allowed turn is not counted as cut off.
+- `TaskJudge` grades the whole transcript against `success_criteria`.
+
+| Metric | Meaning | Gate |
+|---|---|---|
+| `conversations.success_rate` | conversations the judge passed; failed runs count as not passed | ≥ 0.8 (`--min-conversation-success`) |
+| `conversations.error_rate` | conversations that raised | reported |
+| `conversations.turn_limit_rate` | conversations cut off at `max_turns` | reported |
+| `conversations.mean_turns`, `conversations.mean_tokens` | agent replies and agent tokens (simulator not included) per conversation | reported |
+
+The simulator and the task judge use the judge model (`EVALUATION_LLM`), not the model under
+test. Each scenario runs `--runs` times. A conversation costs one agent turn, one simulator call
+per turn and one judge call, so keep scenarios few and their goals specific; vague goals make the
+simulator wander. The sample set has three: a warranty follow-up, a return the policy refuses,
+and a user who keeps pushing for medical advice.
+
 ## Trusting the judge
 
 An LLM judge is a measuring instrument; check it before relying on it (D14 and D24 labs):
@@ -195,8 +233,10 @@ EVALUATION_API_KEY=...   # defaults to OPENAI_API_KEY if not set
 | `app/services/evaluation/judge.py` | `AnswerJudge` (rubric grades, samples combined by `combine_grades`, pairwise with swap), `cohen_kappa` |
 | `app/services/evaluation/trajectory.py` | `match_trajectory`: expected tool calls, `exact` / `in_order` / `any_order` |
 | `app/services/evaluation/runner.py` | Run retrieval and the agent graph (N runs per item), build the report, apply gates, Markdown |
+| `app/services/evaluation/simulation.py` | `Scenario`, `UserSimulator`, `TaskJudge`, `simulate_conversation`, `load_scenarios` |
 | `scripts/eval_rag.py` | CLI |
 | `tests/test_evaluation.py` | Metric maths and the offline retrieval regression gate |
+| `tests/test_simulation.py` | Simulated conversations with scripted models: follow-ups, resuming a paused graph, the turn cap |
 
 ## When you plug it in
 
@@ -206,7 +246,7 @@ EVALUATION_API_KEY=...   # defaults to OPENAI_API_KEY if not set
 
 ## Copy this module
 
-Copy `app/services/evaluation/` with `tests/test_evaluation.py` and `scripts/eval_rag.py`.
+Copy `app/services/evaluation/` with `tests/test_evaluation.py`, `tests/test_simulation.py` and `scripts/eval_rag.py`.
 It imports the RAG package for retrieval runs and `TurnUsage` from `app/services/cost_guard.py`
 (copy it too) for token counts, and nothing from the app.
 
@@ -218,4 +258,5 @@ It imports the RAG package for retrieval runs and `TurnUsage` from `app/services
 | Judge reliability (swap consistency, Cohen's kappa against human labels) | AI20K D24 Eval-Guard lab, phase B |
 | Base trace evaluator | `evals/` from the base template |
 | Tool trajectory match modes (`exact`, `in_order`, `any_order`); repeated runs with pass rate; tool-call, step and token metrics | Ideas from Google ADK (google/adk-python, commit `2084efb`): `src/google/adk/evaluation/trajectory_evaluator.py`, `_multi_run_aggregation_methods.py`, `_efficiency_evaluators.py`. Rewritten for LangChain messages, no code copied |
+| Simulated user with a turn cap and a simulator-decided stop; task-success judge | Ideas from Google ADK `src/google/adk/evaluation/simulation/llm_backed_user_simulator.py` and `multi_turn_task_success_evaluator.py`; the stop is a structured `done` field instead of a stop token, and paused graphs are resumed. Rewritten |
 | Several judge samples combined by vote (`combine_grades`) | Idea from Google ADK `src/google/adk/evaluation/rubric_based_evaluator.py` (majority vote per rubric); the kit takes the median of its 1–5 scores. Rewritten |

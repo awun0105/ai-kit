@@ -1,4 +1,4 @@
-"""Evaluation: golden sets, retrieval metrics, LLM-as-judge with bias controls, gated reports."""
+"""Evaluation: golden sets, retrieval metrics, LLM-as-judge with bias controls, simulated users, gated reports."""
 
 from app.services.evaluation.dataset import (
     GoldenItem,
@@ -13,6 +13,14 @@ from app.services.evaluation.retrieval import (
     RetrievalScores,
     score_retrieval,
 )
+from app.services.evaluation.simulation import (
+    ConversationResult,
+    Scenario,
+    TaskJudge,
+    UserSimulator,
+    load_scenarios,
+    simulate_conversation,
+)
 from app.services.evaluation.runner import (
     EvalReport,
     build_report,
@@ -24,14 +32,20 @@ from app.services.evaluation.runner import (
 __all__ = [
     "AnswerGrade",
     "AnswerJudge",
+    "ConversationResult",
     "EvalReport",
     "GoldenItem",
     "RetrievalScores",
+    "Scenario",
+    "TaskJudge",
+    "UserSimulator",
     "build_report",
     "cohen_kappa",
     "evaluate_answers",
     "evaluate_retrieval",
     "load_golden",
+    "load_scenarios",
     "score_retrieval",
+    "simulate_conversation",
     "to_markdown",
 ]

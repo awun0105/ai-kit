@@ -35,6 +35,10 @@ from app.services.evaluation.retrieval import (
     aggregate,
     score_retrieval,
 )
+from app.services.evaluation.simulation import (
+    ConversationResult,
+    summarize_conversations,
+)
 from app.services.evaluation.trajectory import match_trajectory
 from app.services.rag import RAGPipeline
 from app.services.rag.citations import (
@@ -97,8 +101,10 @@ class EvalReport(BaseModel):
     config: dict[str, Any]
     retrieval: dict[str, dict[str, float]] = Field(default_factory=dict)
     answers: dict[str, dict[str, float]] = Field(default_factory=dict)
+    conversations: dict[str, dict[str, float]] = Field(default_factory=dict)
     gates: list[Gate] = Field(default_factory=list)
     items: list[ItemResult] = Field(default_factory=list)
+    conversation_results: list[ConversationResult] = Field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -257,7 +263,16 @@ def summarize_answers(items: list[GoldenItem], results: dict[str, ItemResult]) -
     return summary
 
 
-LOWER_IS_BETTER = {"error_rate", "bad_citation_rate", "p95_latency_s", "mean_tool_calls", "mean_steps", "mean_tokens"}
+LOWER_IS_BETTER = {
+    "error_rate",
+    "bad_citation_rate",
+    "p95_latency_s",
+    "mean_tool_calls",
+    "mean_steps",
+    "mean_tokens",
+    "turn_limit_rate",
+    "mean_turns",
+}
 
 
 def apply_gates(report: EvalReport, thresholds: dict[str, float]) -> None:
@@ -277,8 +292,9 @@ def build_report(
     items: list[GoldenItem],
     results: dict[str, ItemResult],
     thresholds: dict[str, float],
+    conversations: Optional[list[ConversationResult]] = None,
 ) -> EvalReport:
-    """Aggregate per-item results into a report and evaluate the gates."""
+    """Aggregate per-item (and simulated conversation) results into a report and evaluate the gates."""
     retrieval_scores = {i: r.retrieval for i, r in results.items() if r.retrieval is not None}
     report = EvalReport(
         created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -287,6 +303,8 @@ def build_report(
         retrieval=aggregate(retrieval_scores, {i.id: i.difficulty for i in items}) if retrieval_scores else {},
         answers=summarize_answers(items, results),
         items=[results[i.id] for i in items if i.id in results],
+        conversations=summarize_conversations(conversations or []),
+        conversation_results=conversations or [],
     )
     apply_gates(report, thresholds)
     return report
@@ -302,7 +320,11 @@ def to_markdown(report: EvalReport) -> str:
             for g in report.gates
         ]
         lines.append("")
-    for title, table in (("Retrieval", report.retrieval), ("Answers", report.answers)):
+    for title, table in (
+        ("Retrieval", report.retrieval),
+        ("Answers", report.answers),
+        ("Conversations", report.conversations),
+    ):
         if not table:
             continue
         metrics = sorted({m for row in table.values() for m in row})
@@ -311,6 +333,7 @@ def to_markdown(report: EvalReport) -> str:
             lines.append(f"| {group} | " + " | ".join(str(row.get(m, "")) for m in metrics) + " |")
         lines.append("")
     lines += _items_to_look_at(report.items)
+    lines += _conversations_to_look_at(report.conversation_results)
     return "\n".join(lines) + "\n"
 
 
@@ -340,4 +363,15 @@ def _items_to_look_at(items: list[ItemResult]) -> list[str]:
         else:
             why = f"expected sources not retrieved (got {r.retrieved[:3]})"
         lines.append(f"- **{r.id}** ({r.difficulty}) {r.question} — {why}")
+    return lines
+
+
+def _conversations_to_look_at(results: list[ConversationResult]) -> list[str]:
+    failed = [r for r in results if r.success is not True]
+    if not failed:
+        return []
+    lines = ["", "## Conversations to look at", ""]
+    for r in failed:
+        why = r.error or r.rationale or r.stop_reason
+        lines.append(f"- **{r.scenario_id}** ({r.turns} turns, {r.stop_reason}) — {why}")
     return lines

@@ -10,6 +10,9 @@ Full run: the real agent graph answers every question, a separate judge model
 Evaluate the knowledge base the app already serves instead of a fresh copy of the sample corpus:
     APP_ENV=development uv run python -m scripts.eval_rag --dataset my_golden.jsonl --use-knowledge-base
 
+Add multi-turn conversations with a simulated user (same model as the judge):
+    APP_ENV=development uv run python -m scripts.eval_rag --scenarios evals/datasets/orbittech/scenarios.json
+
 Run every question 3 times and gate on how often, and how consistently, the agent gets it right:
     APP_ENV=development uv run python -m scripts.eval_rag --runs 3 --min-pass-rate 0.8 --min-pass-all-runs 0.7
 """
@@ -32,10 +35,15 @@ from app.core.langgraph.graph import LangGraphAgent
 from app.core.langgraph.tools.knowledge_search import knowledge_search
 from app.services.evaluation import (
     AnswerJudge,
+    ConversationResult,
+    TaskJudge,
+    UserSimulator,
     build_report,
     evaluate_answers,
     evaluate_retrieval,
     load_golden,
+    load_scenarios,
+    simulate_conversation,
     to_markdown,
 )
 from app.services.rag import (
@@ -66,6 +74,8 @@ def _args() -> argparse.Namespace:
     p.add_argument("--min-refusal", type=float, default=0.66)
     p.add_argument("--max-bad-citations", type=float, default=0.1)
     p.add_argument("--max-error-rate", type=float, default=0.0, help="Share of runs whose agent or judge failed")
+    p.add_argument("--scenarios", type=Path, help="Simulated multi-turn conversations (JSON list or JSONL)")
+    p.add_argument("--min-conversation-success", type=float, default=0.8, help="With --scenarios")
     p.add_argument("--runs", type=int, default=1, help="Times the agent answers each question")
     p.add_argument("--judge-samples", type=int, default=1, help="Grades per answer, combined by median and majority")
     p.add_argument("--pass-score", type=int, default=4, help="Judge score a run needs to pass")
@@ -109,6 +119,7 @@ async def main() -> int:
     items = load_golden(args.dataset, retrieval_tool=knowledge_search.name)
     pipeline = await _pipeline(args)
     results = await evaluate_retrieval(pipeline, items, args.k)
+    conversations: list[ConversationResult] = []
     thresholds = {
         "retrieval.hit": args.min_hit,
         "retrieval.recall": args.min_recall,
@@ -150,6 +161,12 @@ async def main() -> int:
             "answers.mean_tool_calls": args.max_mean_tool_calls,
         }
         thresholds |= {metric: value for metric, value in optional.items() if value > 0}
+        if args.scenarios:
+            simulator, task_judge = UserSimulator(judge_model), TaskJudge(judge_model)
+            for scenario in load_scenarios(args.scenarios):
+                for _ in range(args.runs):
+                    conversations.append(await simulate_conversation(graph, simulator, scenario, task_judge))
+            thresholds["conversations.success_rate"] = args.min_conversation_success
 
     config = {
         "k": args.k,
@@ -158,8 +175,9 @@ async def main() -> int:
         "runs": 0 if args.retrieval_only else args.runs,
         "judge": None if args.retrieval_only else settings.EVALUATION_LLM,
         "judge_samples": args.judge_samples,
+        "scenarios": str(args.scenarios) if args.scenarios and not args.retrieval_only else None,
     }
-    report = build_report(str(args.dataset), config, items, results, thresholds)
+    report = build_report(str(args.dataset), config, items, results, thresholds, conversations)
 
     args.out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
