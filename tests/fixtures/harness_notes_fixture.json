@@ -1,0 +1,5 @@
+{
+  "write": {"op": "write_note", "args": {"id": "conformance", "title": "Conformance", "body": "Written by the suite."}},
+  "invalid_write": {"op": "write_note", "args": {"id": "broken", "title": "", "body": ""}},
+  "dangerous": {"op": "publish_note", "args": {"id": "conformance"}}
+}

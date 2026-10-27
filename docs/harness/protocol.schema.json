@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "In-app agent harness protocol",
+  "protocol_version": "0.1",
+  "definitions": {
+    "Operation": {
+      "description": "Something the app can do: a tool for the agent.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "level": {
+          "enum": [
+            "read",
+            "write",
+            "dangerous"
+          ],
+          "title": "Level",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "level"
+      ],
+      "title": "Operation",
+      "type": "object"
+    },
+    "AppDescription": {
+      "$defs": {
+        "Operation": {
+          "description": "Something the app can do: a tool for the agent.",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "description": {
+              "title": "Description",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": true,
+              "title": "Params",
+              "type": "object"
+            },
+            "level": {
+              "enum": [
+                "read",
+                "write",
+                "dangerous"
+              ],
+              "title": "Level",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "description",
+            "level"
+          ],
+          "title": "Operation",
+          "type": "object"
+        }
+      },
+      "description": "What ``app.describe`` returns.",
+      "properties": {
+        "protocol_version": {
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/Operation"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "supports": {
+          "items": {
+            "enum": [
+              "undo",
+              "materialize",
+              "effects"
+            ],
+            "type": "string"
+          },
+          "title": "Supports",
+          "type": "array"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "operations"
+      ],
+      "title": "AppDescription",
+      "type": "object"
+    },
+    "AppContext": {
+      "description": "What ``app.context`` returns: the current revision and a size-bounded view of the state.",
+      "properties": {
+        "revision": {
+          "title": "Revision",
+          "type": "string"
+        },
+        "state": {
+          "default": null,
+          "title": "State"
+        },
+        "selection": {
+          "default": null,
+          "title": "Selection"
+        }
+      },
+      "required": [
+        "revision"
+      ],
+      "title": "AppContext",
+      "type": "object"
+    },
+    "ValidationIssue": {
+      "description": "One problem found in a draft.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ValidationIssue",
+      "type": "object"
+    },
+    "ValidationReport": {
+      "$defs": {
+        "ValidationIssue": {
+          "description": "One problem found in a draft.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Path"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ValidationIssue",
+          "type": "object"
+        }
+      },
+      "description": "What ``draft.validate`` and ``draft.sync`` return.",
+      "properties": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/ValidationIssue"
+          },
+          "title": "Issues",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "ValidationReport",
+      "type": "object"
+    },
+    "Effect": {
+      "description": "An approved ``dangerous`` operation, run with ``effect.run`` only after its revision is committed.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "op": {
+          "title": "Op",
+          "type": "string"
+        },
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "op"
+      ],
+      "title": "Effect",
+      "type": "object"
+    },
+    "CommitResult": {
+      "description": "What ``draft.commit`` returns: the new revision, or ``conflict`` when the base has moved.",
+      "properties": {
+        "revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        },
+        "conflict": {
+          "default": false,
+          "title": "Conflict",
+          "type": "boolean"
+        }
+      },
+      "title": "CommitResult",
+      "type": "object"
+    },
+    "DraftDiff": {
+      "description": "What ``draft.diff`` returns: a text summary plus any app-defined detail.",
+      "properties": {
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "detail": {
+          "default": null,
+          "title": "Detail"
+        }
+      },
+      "required": [
+        "summary"
+      ],
+      "title": "DraftDiff",
+      "type": "object"
+    }
+  }
+}

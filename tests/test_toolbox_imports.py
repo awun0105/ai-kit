@@ -21,6 +21,7 @@ TOOLBOX = [
     "app.services.agents",
     "app.services.cost_guard",
     "app.services.compaction",
+    "app.services.harness",
 ]
 APP_MODULES = ["app.core.config", "app.core.logging", "app.services.llm", "app.services.database", "app.core.kit"]
 
@@ -42,3 +43,14 @@ def test_toolbox_module_imports_without_the_app(module):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "", f"{module} pulled in {result.stdout.strip()}"
+
+
+def test_harness_core_loads_no_langchain():
+    probe = "import sys, app.services.harness; print(','.join(m for m in sys.modules if m.split('.')[0] in ('langchain', 'langchain_core', 'langgraph')))"
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT)}
+    result = subprocess.run(
+        [sys.executable, "-c", probe], cwd=ROOT / "tests" / "fixtures", env=env, capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
