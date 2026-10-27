@@ -59,9 +59,10 @@ async def _persist_session_name(session_id: str, user_message: str) -> None:
             ],
             model_name="gpt-5.4-nano",
             response_format=SessionTitle,
+            # Reasoning models reject temperature, and reasoning tokens count toward the limit,
+            # so a 32-token cap left nothing for the title.
             reasoning={"effort": "low"},
-            max_tokens=32,
-            temperature=0.3,
+            max_completion_tokens=256,
         )
         await database_service.update_session_name(session_id, result.title)
         session_names_generated_total.labels(status="success").inc()
