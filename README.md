@@ -1,54 +1,99 @@
-# AI Kit — a production starter for LLM and agent apps
+<a id="top"></a>
 
-A FastAPI + LangGraph application you start new agent apps from. It ships the parts every
-LLM product ends up needing, each one tested offline, documented, and off by default when it
-costs money or changes behaviour:
+<p align="center"><img src="./assets/banner.png" alt="AI Kit — agent development kit" /></p>
 
-| Layer | What you get | Doc |
-|---|---|---|
-| Agent core | LangGraph agent with Postgres checkpointing, tool calling, human-in-the-loop, mem0 long-term memory, JWT sessions, rate limiting | [architecture](docs/architecture.md) |
-| RAG | Ingest md/txt/pdf/docx/html, hybrid retrieval (pgvector + BM25 with Vietnamese word segmentation + RRF), optional reranker, cited answers via `knowledge_search` | [rag](docs/rag.md) |
-| Guardrails | Prompt-injection and PII rails (EN + VI), optional LLM policy rail, human approval for risky tools, egress allowlist, output redaction while streaming | [guardrails](docs/guardrails.md) |
-| Reliability | One retry layer with classified errors, jitter and a retry budget, per-model circuit breakers, fallback ladder, answer cache with stale-if-error, SLO burn-rate alerts | [reliability](docs/reliability.md) |
-| Tools | Load MCP server tools, serve the knowledge base over MCP, serve the agent and call other agents over A2A | [tools](docs/tools.md) |
-| Agents | `ResilientChatModel` for any LangChain agent, a deep-research team (lead + researchers) on deepagents, citation checks | [agents](docs/agents.md) |
-| Evaluation | Golden-set evaluation: retrieval metrics, the real agent graded by a separate judge, tool trajectories, repeated runs, simulated multi-turn users, judge-bias controls, CI gates | [evaluation](docs/evaluation.md) |
-| History | Per-call history budget that never drops the current turn; optional rolling summary of the oldest turns | [compaction](docs/compaction.md) |
-| Delivery | Gated release to GHCR with SBOM and Trivy, nightly evals, non-root multi-stage image, per-user cost guard | [deployment](docs/deployment.md) |
+<div align="center">
 
-## Start a new app
+[Tiếng Việt: README_VN.md](README_VN.md)
 
-```bash
-# generate a project and choose its features
-uvx copier copy --trust <kit-repo-or-path> my-app
-cd my-app && git init
+**A toolbox of tested parts for LLM and agent apps, assembled into a runnable FastAPI + LangGraph app.**
 
-# or clone the kit and set it up in place
-python3 scripts/bootstrap.py --features rag,answer-cache
-```
+[![CI](https://github.com/awun0105/ai-kit/actions/workflows/ci.yaml/badge.svg)](https://github.com/awun0105/ai-kit/actions/workflows/ci.yaml)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/)
 
-Either way you get `.env.development` with a random JWT secret and the chosen features on,
-plus the next commands to run:
+</div>
 
-```bash
-uv sync                          # add --extra rerank / a2a / deep for those features
-make test                        # offline test suite, no API key needed
-# put OPENAI_API_KEY in .env.development, then
-make docker-up                   # API + Postgres/pgvector: http://localhost:8000/docs
-make ingest CORPUS=path/to/docs  # load documents into the knowledge base
-```
+---
 
-Update a generated app with later kit improvements: `uvx copier update --trust`.
+## Table of Contents
 
-### Take one component into another project
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Repository Structure](#repository-structure)
+- [Getting Started](#getting-started)
+- [Advanced Usage](#advanced-usage)
+- [Documentation](#documentation)
+- [Acknowledgement](#acknowledgement)
+- [License](#license)
 
-Each layer under `app/services/` (rag, guardrails, reliability, evaluation, mcp, a2a, agents,
-cost_guard, compaction) imports on its own: no settings, database or model registry, which
-`tests/test_toolbox_imports.py` checks. Copy the package with its tests and follow the
-**Copy this module** and **When you plug it in** sections of its doc; `app/core/kit.py` shows
-how the app builds each one from settings.
+---
 
-### First request
+## Overview
+
+AI Kit collects the parts every LLM product ends up needing: retrieval, guardrails, retries
+across models, evaluation and a release pipeline. Each part lives in its own package under
+`app/services/`, has offline tests and a doc page, and stays off by default when it costs money
+or changes behaviour. The parts are wired together into a working agent app, so a new project
+can start from the whole app or copy a single part into an existing codebase.
+
+## Key Features
+
+- **Agent core:** LangGraph agent with Postgres checkpoints, tool calling, human approval, mem0 memory, JWT sessions, rate limits and a history budget with optional summarization of old turns.
+- **RAG:** ingest md, txt, pdf, docx and html; hybrid search (pgvector + BM25 with Vietnamese word segmentation); optional reranker; answers with checked citations.
+- **Guardrails:** prompt-injection and PII rails in English and Vietnamese, an optional LLM policy rail, approval for risky tools, an egress allowlist, redaction while streaming.
+- **Reliability:** one retry layer with a retry budget, per-model circuit breakers, a fallback ladder across models, an answer cache that serves stale answers when providers are down.
+- **Tools and agents:** MCP client and server, A2A server and client, a deep-research team, `ResilientChatModel` for any LangChain agent.
+- **Evaluation:** golden sets with retrieval metrics, a separate judge model, tool-call checks, repeated runs, simulated multi-turn users and CI gates.
+- **Delivery:** non-root Docker image, release to GHCR after a Trivy scan, Prometheus alerts, a per-user monthly cost limit.
+
+## Repository Structure
+
+| Path | Description |
+|---|---|
+| `app/services/` | The toolbox: `rag/`, `guardrails/`, `reliability/`, `evaluation/`, `mcp/`, `a2a/`, `agents/`, `cost_guard.py`, `compaction.py` |
+| `app/core/kit.py` | Builds each toolbox part from settings; the one place that reads them |
+| `app/core/langgraph/` | The agent graph: input guard, chat, tools, output rail |
+| `app/api/v1/` | Auth, chat and streaming routes |
+| `scripts/` | `bootstrap`, `ingest`, `eval_rag`, `research` |
+| `evals/datasets/` | Sample corpus, golden set and conversation scenarios |
+| `tests/` | Offline tests for every part |
+| `docs/` | One page per part; `ROADMAP.md` lists them |
+
+## Getting Started
+
+Needs Python 3.13+, [uv](https://docs.astral.sh/uv/) and Docker.
+
+1. Generate a project and choose its features (RAG, answer cache, LLM rail, reranker, MCP, A2A, deep research):
+
+   ```bash
+   uvx copier copy --trust gh:awun0105/ai-kit my-app
+   cd my-app && git init
+   ```
+
+   This writes `.env.development` with a random JWT secret and the chosen features turned on.
+
+2. Install and run the offline tests (no API key needed):
+
+   ```bash
+   uv sync        # add --extra rerank / a2a / deep for those features
+   make test
+   ```
+
+3. Put `OPENAI_API_KEY` in `.env.development`, then start the API with Postgres and pgvector:
+
+   ```bash
+   make docker-up
+   ```
+
+4. Load documents into the knowledge base and open `http://localhost:8000/docs`:
+
+   ```bash
+   make ingest CORPUS=path/to/docs
+   ```
+
+<details>
+<summary>First request from the command line</summary>
 
 ```bash
 TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/register -H "Content-Type: application/json" \
@@ -58,73 +103,50 @@ curl -X POST localhost:8000/api/v1/chatbot/chat -H "Authorization: Bearer $SESSI
   -H "Content-Type: application/json" -d '{"messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-See [getting started](docs/getting-started.md) for local development without Docker.
+</details>
 
-## Everyday commands
+Local development without Docker: [docs/getting-started.md](docs/getting-started.md).
 
-| Command | Does |
-|---|---|
-| `make test` | Run the test suite (offline; integration tests skip unless `RAG_TEST_PG_URL` is set) |
-| `make check` | ruff + pyright |
-| `make dev` | Run the API locally with reload |
-| `make ingest CORPUS=dir` | Ingest documents (re-runs skip unchanged chunks, drop chunks a document no longer has, and invalidate stale cached answers; `--prune` via `scripts.ingest` also removes deleted documents) |
-| `make eval-rag-offline` | Retrieval regression check on the sample golden set (the CI gate) |
-| `make eval-rag` | Full golden-set evaluation with a judge model |
-| `python -m app.mcp_server` | Serve the knowledge base to other agents over MCP (stdio) |
-| `python -m scripts.research "topic"` | Run the deep-research team from the command line |
-| `make stack-up` | API, Postgres, Valkey, Prometheus (with SLO alerts), Grafana |
+## Advanced Usage
 
-## Project structure
+**Take one part into another project.** Each package under `app/services/` imports on its own,
+without the app's settings, database or model registry (`tests/test_toolbox_imports.py` checks
+it). Copy the package with its tests and follow the **Copy this module** and **When you plug it
+in** sections of its doc. `app/core/kit.py` shows how the app builds it from settings.
 
-```
-app/
-  api/v1/                 route handlers (auth, chat, streaming)
-  core/langgraph/         agent graph: input guard -> chat -> tools (approval, screening) -> output rail
-  core/                   settings, logging, metrics, middleware, cache, rate limits, prompts
-  core/kit.py             wiring: builds each toolbox component from settings (get_*/set_*)
-  services/
-    llm/                  model registry and the resilient call path
-    reliability/          error classes, retry budget, circuit breakers, invoker, answer cache
-    rag/                  ingestion, chunking, embeddings, stores, ranking, citations
-    guardrails/           detectors, LLM policy rail, tool policy, stream redaction
-    mcp/  a2a/            MCP toolkit; A2A server and remote-agent tool
-    agents/               ResilientChatModel, deep-research team
-    evaluation/           golden sets, retrieval metrics, judge, reports
-    cost_guard.py         per-user monthly budget
-    compaction.py         summarize the oldest turns of long conversations
-  mcp_server.py           the knowledge base as an MCP server
-scripts/                  bootstrap, ingest, eval_rag, research
-evals/                    Langfuse trace evaluator (base template) and datasets/ (golden sets)
-prometheus/               scrape config, SLO alert rules and their promtool tests
-tests/                    offline tests for every layer
-docs/                     one page per layer; ROADMAP.md lists them
-```
+**Pull later kit improvements** into a generated project with `uvx copier update --trust`.
+
+**Evaluate before shipping:** `make eval-rag-offline` checks retrieval without an API key (the
+CI gate); `make eval-rag` runs the real agent against the golden set with a judge model. Options
+such as `--runs 3` and `--scenarios` are in [docs/evaluation.md](docs/evaluation.md).
 
 ## Documentation
 
-| Guide | What it covers |
-|---|---|
-| [Roadmap](docs/ROADMAP.md) | The layers, their status and where each came from |
-| [Getting started](docs/getting-started.md) | Prerequisites, local setup, first API call |
-| [Architecture](docs/architecture.md) | System design, request flow |
-| [Configuration](docs/configuration.md) | Base environment variables (each layer's page lists its own) |
-| [Authentication](docs/authentication.md) | JWT flow, sessions |
-| [Database](docs/database.md) | Schema, Alembic migrations, pgvector |
-| [LLM service](docs/llm-service.md) | Model registry, fallback ladder, structured output |
-| [Memory](docs/memory.md) | mem0 long-term memory |
-| [RAG](docs/rag.md), [Guardrails](docs/guardrails.md), [Reliability](docs/reliability.md), [Tools](docs/tools.md), [Agents](docs/agents.md), [Evaluation](docs/evaluation.md), [Deployment](docs/deployment.md) | The kit layers |
-| [Observability](docs/observability.md) | Langfuse, structured logs, Prometheus, profiling |
-| [Docker](docs/docker.md) | Compose and the monitoring stack |
+Start with [docs/ROADMAP.md](docs/ROADMAP.md): every part, its status and where it came from.
+Each part has its own page: [RAG](docs/rag.md), [guardrails](docs/guardrails.md),
+[reliability](docs/reliability.md), [tools](docs/tools.md), [agents](docs/agents.md),
+[evaluation](docs/evaluation.md), [conversation history](docs/compaction.md),
+[deployment](docs/deployment.md). Settings are in [docs/configuration.md](docs/configuration.md);
+coding rules for people and coding agents are in [AGENTS.md](AGENTS.md).
 
-Coding conventions for people and coding agents: [AGENTS.md](AGENTS.md).
+## Acknowledgement
 
-## Where it comes from
+- [fastapi-langgraph-agent-production-ready-template](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template) (MIT): the base app.
+- AI20K (VinUniversity) labs D08, D09, D11, D12, D14 (the author's solutions) and D16, D18, D23, D24, D25 (specifications).
+- [Google ADK](https://github.com/google/adk-python): ideas for history compaction and agent evaluation, rewritten for LangGraph.
+- LangGraph, LangChain, deepagents, FastMCP, a2a-sdk, MarkItDown, underthesea, bm25s, rerankers, pgvector.
 
-- Base: [fastapi-langgraph-agent-production-ready-template](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template) (MIT).
-- Layers ported or specified from the AI20K (VinUniversity) labs, mostly from the author's own
-  solutions: D08 RAG, D11 guardrails, D12 deployment, D14 evaluation, D09 MCP/A2A; and from the
-  lab specifications of D16, D18, D23, D24, D25. Each layer's doc names the files and commits.
-- Libraries chosen per concern: LangGraph, LangChain (`langchain.mcp`), deepagents, FastMCP,
-  a2a-sdk, MarkItDown, underthesea, bm25s, rerankers, pgvector.
+Each part's doc names the exact files and commits it came from.
 
-Security issues: see [SECURITY.md](SECURITY.md). License: [LICENSE](LICENSE) (MIT, from the base template).
+## License
+
+MIT, inherited from the base template: see [LICENSE](LICENSE). To report a security issue, see
+[SECURITY.md](SECURITY.md).
+
+---
+
+<div align="center">
+
+[Back to Top](#top)
+
+</div>

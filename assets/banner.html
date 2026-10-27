@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!-- Source of the README banner. Render: render.sh banner.html banner.png 1600 500 1.5
+     Fill in: fonts (the <link>), the :root colours, the title / tagline, and ONE visual
+     variant in .visual (keep the one you use, delete the others). -->
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-1: #17352d;      /* glow behind the visual */
+    --bg-2: #0e1a17;      /* main background */
+    --bg-3: #08100e;      /* edges */
+    --ink: #EEF3EF;       /* title */
+    --muted: #B9C9C1;     /* tagline */
+    --accent: #F2B544;    /* accent word in the title */
+    --accent-2: #5FD3A6;  /* the short rule */
+    --title-font: "Space Grotesk", system-ui, sans-serif;
+    --body-font: "Space Grotesk", system-ui, sans-serif;
+    --mono-font: "JetBrains Mono", ui-monospace, monospace;
+    --W: 1600px; --H: 500px;
+  }
+  html, body { margin: 0; }
+  body { width: var(--W); height: var(--H); overflow: hidden; position: relative; color: var(--ink); font-family: var(--body-font);
+    background: radial-gradient(ellipse at 78% 40%, var(--bg-1) 0%, var(--bg-2) 55%, var(--bg-3) 100%); }
+  /* Fine grain so the background isn't flat. Remove for a clean / corporate look. */
+  .grain { position: absolute; inset: 0; opacity: .08; background-image: radial-gradient(#fff .6px, transparent .6px); background-size: 4px 4px; }
+
+  .text { position: absolute; left: 110px; top: 50%; transform: translateY(-52%); max-width: 760px; }
+  h1 { font-family: var(--title-font); font-weight: 700; font-size: 172px; line-height: .9; margin: 0; letter-spacing: -.04em; white-space: nowrap; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .rule { width: 120px; height: 6px; border-radius: 3px; background: var(--accent-2); margin: 34px 0 22px; }
+  .stack { margin: 18px 0 0; font: 21px/1.4 var(--mono-font); color: var(--accent-2); opacity: .85; }
+  .tagline { margin: 0; font-size: 25px; font-weight: 600; letter-spacing: .32em; text-transform: uppercase; color: var(--muted); }
+
+  .visual { position: absolute; right: 70px; top: 0; width: 760px; height: var(--H); }
+
+  /* Variant A — screenshots fanned like cards on a table (apps, sites, templates, UIs) */
+  .cards img { position: absolute; width: 430px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px;
+    box-shadow: 0 24px 50px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08); }
+
+  /* Variant B — terminal + code cards (CLIs, libraries, SDKs) */
+  .panel { position: absolute; border-radius: 14px; overflow: hidden; font: 20px/1.6 var(--mono-font);
+    box-shadow: 0 24px 50px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08); }
+  .panel .bar { height: 34px; display: flex; gap: 8px; align-items: center; padding: 0 14px; background: rgba(255,255,255,.07); }
+  .panel .bar i { width: 12px; height: 12px; border-radius: 50%; background: rgba(255,255,255,.25); }
+  .panel pre { margin: 0; padding: 18px 22px; white-space: pre; }
+  .term { left: 10px; top: 60px; width: 540px; background: #0e0d0b; transform: rotate(-4deg); }
+  .code { left: 215px; top: 268px; width: 530px; background: #f6f2e6; color: #2a241b; transform: rotate(3deg); }
+  .k { color: var(--accent); } .s { color: var(--accent-2); } .c { opacity: .55; } .p { color: var(--muted); }
+  .code .k { color: #b5487e; } .code .s { color: #6b7a1f; }
+  .code .bar { background: rgba(0,0,0,.06); } .code .bar i { background: rgba(0,0,0,.22); }
+
+  /* Variant C — abstract shapes (when there is nothing to show) */
+  .shapes span { position: absolute; border-radius: 50%; mix-blend-mode: screen; opacity: .9; }
+</style>
+</head>
+<body>
+  <div class="grain"></div>
+  <div class="text">
+    <h1>AI <em>Kit</em></h1>
+    <div class="rule"></div>
+    <p class="tagline">Agent development kit</p>
+    <p class="stack">FastAPI · LangGraph · RAG · Guardrails · Evals</p>
+  </div>
+
+  <!-- Visual: the real generate/test commands and a real RAG snippet -->
+  <div class="visual">
+    <div class="panel term"><div class="bar"><i></i><i></i><i></i></div><pre><span class="p">$</span> uvx copier copy --trust \
+    <span class="s">gh:awun0105/ai-kit</span> my-app
+<span class="p">$</span> make test
+<span class="s">184 passed</span><span class="c">, 3 skipped</span></pre></div>
+    <div class="panel code"><div class="bar"><i></i><i></i><i></i></div><pre>rag = RAGPipeline(embedder, store)
+<span class="k">await</span> rag.ingest(docs)
+hits = <span class="k">await</span> rag.retrieve(<span class="s">"bảo hành?"</span>)</pre></div>
+  </div>
+</body>
+</html>
