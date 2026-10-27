@@ -22,7 +22,7 @@ LLM-as-judge evals, Docker Compose.
 | 6 | Evaluation: golden sets, retrieval metrics, judged agent answers, judge-bias controls, CI gate — [docs/evaluation.md](evaluation.md) | done | D14 (author's solution), D24 |
 | 7 | CI/CD and deploy: gated release to GHCR with SBOM and Trivy, nightly eval, multi-stage non-root image, cost guard, safe errors, bounded metrics — [docs/deployment.md](deployment.md) | done | D12 (author's solution), D21 |
 | 8 | Packaging: `copier` template + `scripts/bootstrap.py`, kit README, `ai-kit` agent skill (in `~/.agents/skills/ai-kit`) | done | – |
-| 9 | Toolbox hardening: each component imports on its own (wiring in `app/core/kit.py`, checked by `tests/test_toolbox_imports.py`), safe defaults when plugged in (`guard_tools`, `nostream` rail, `AnswerCache(shared=...)`, per-caller A2A, timeout budget check), a "When you plug it in" and "Copy this module" section in every layer doc | done | review of the kit (branch `adk-hardening`) |
+| 9 | Toolbox hardening: each component imports on its own (wiring in `app/core/kit.py`, checked by `tests/test_toolbox_imports.py`), safe defaults when plugged in (`guard_tools`, `nostream` rail, `AnswerCache(shared=...)`, per-caller A2A, timeout budget check), a "When you plug it in" and "Copy this module" section in every layer doc | done | review of the kit |
 | 10 | Lessons from Google ADK: history budget fix and compaction ([docs/compaction.md](compaction.md)); tool trajectory, repeated runs, efficiency gates, judge samples, simulated users ([docs/evaluation.md](evaluation.md)) | done | google/adk-python `2084efb` (ideas, rewritten) |
 
 ## Rules for every layer
