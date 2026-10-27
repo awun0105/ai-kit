@@ -28,9 +28,9 @@ orders_processed = Counter("orders_processed_total", "Total number of orders pro
 
 llm_inference_duration_seconds = Histogram(
     "llm_inference_duration_seconds",
-    "Time spent processing LLM inference",
+    "Latency of the successful attempt, by the registry model that answered",
     ["model"],
-    buckets=[0.1, 0.3, 0.5, 1.0, 2.0, 5.0],
+    buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0],  # reasoning models often take 5-30 s
 )
 
 

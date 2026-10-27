@@ -20,6 +20,7 @@ import structlog
 from app.core.metrics import (
     llm_attempts_total,
     llm_breaker_state,
+    llm_inference_duration_seconds,
 )
 from app.services.reliability.breaker import (
     BreakerState,
@@ -181,8 +182,10 @@ class ResilientInvoker:
                         continue
                     break  # fail over to the next rung
                 else:
-                    breaker.on_success(permit, self._clock() - started)
+                    latency = self._clock() - started
+                    breaker.on_success(permit, latency)
                     llm_attempts_total.labels(model=name, outcome="success").inc()
+                    llm_inference_duration_seconds.labels(model=name).observe(latency)
                     return result
 
         tried = ", ".join(name for name, _ in ladder)

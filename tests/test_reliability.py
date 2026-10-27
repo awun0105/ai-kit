@@ -6,6 +6,7 @@ import random
 import httpx
 import openai
 import pytest
+from prometheus_client import REGISTRY
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -275,6 +276,20 @@ async def test_attempt_timeout_fails_over():
     slow, backup = Provider("a", delay=1.0), Provider("b")
 
     assert await inv.invoke(_ladder(slow, backup)) == "answer from b"
+
+
+async def test_latency_is_recorded_for_the_model_that_answered():
+    # The graph used to time the whole ladder under the primary's name, even when a fallback answered.
+    clock = FakeClock()
+    inv, _ = _invoker(clock, max_attempts=1)
+
+    def count(model):
+        return REGISTRY.get_sample_value("llm_inference_duration_seconds_count", {"model": model}) or 0.0
+
+    before_a, before_b = count("lat-a"), count("lat-b")
+    await inv.invoke([("lat-a", Provider("lat-a", [SERVER])), ("lat-b", Provider("lat-b"))])
+
+    assert count("lat-a") == before_a and count("lat-b") == before_b + 1
 
 
 def test_timeout_budget_must_leave_room_for_a_fallback_rung():

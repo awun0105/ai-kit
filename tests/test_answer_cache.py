@@ -283,7 +283,7 @@ async def test_failed_turn_does_not_swallow_the_next_question(monkeypatch, rag_a
         monkeypatch, [AllProvidersFailedError("down", None, None), AIMessage(content="hello again")]
     )
 
-    with pytest.raises(Exception, match="failed to get llm response"):
+    with pytest.raises(AllProvidersFailedError):
         await agent.get_response([Message(role="user", content="first try")], session_id="s-d")
     reply = await agent.get_response([Message(role="user", content="second question")], session_id="s-d")
 

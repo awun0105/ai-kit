@@ -87,7 +87,7 @@ Metrics are exposed at `GET /metrics` and scraped by Prometheus.
 | --- | --- | --- |
 | `http_requests_total` | Counter | Request count by method, endpoint, status |
 | `http_request_duration_seconds` | Histogram | Request latency by method, endpoint |
-| `llm_inference_duration_seconds` | Histogram | LLM call latency by model |
+| `llm_inference_duration_seconds` | Histogram | Latency of the successful attempt, labelled with the registry model that answered (a fallback is not counted under the primary); buckets up to 60 s |
 | `llm_stream_duration_seconds` | Histogram | Streaming call latency by model |
 | `db_connections` | Gauge | Active database connections |
 

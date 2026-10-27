@@ -56,7 +56,6 @@ from app.core.langgraph.tools import tools
 from app.core.logging import logger
 from app.core.metrics import (
     answer_cache_events_total,
-    llm_inference_duration_seconds,
     rag_citation_issues_total,
 )
 from app.core.observability import langfuse_callback_handler
@@ -222,14 +221,6 @@ class LangGraphAgent:
         Returns:
             Command: Command object with updated state and next node to execute.
         """
-        # Get the current LLM instance for metrics
-        current_llm = self.llm_service.get_llm()
-        model_name = (
-            current_llm.model_name
-            if current_llm and hasattr(current_llm, "model_name")
-            else settings.DEFAULT_LLM_MODEL
-        )
-
         metadata = config.get("metadata", {})
         # An answer bound for the shared answer cache is served to every user: build it from a
         # prompt that carries no one's name or long-term memory.
@@ -244,9 +235,9 @@ class LangGraphAgent:
         messages = prepare_messages(state.messages, SYSTEM_PROMPT)
 
         try:
-            # Use LLM service with automatic retries and circular fallback
-            with llm_inference_duration_seconds.labels(model=model_name).time():
-                response_message = await self.llm_service.call(dump_messages(messages))
+            # One resilient call: retries, breakers and fallback across models happen inside,
+            # and the invoker records the latency of the model that answered.
+            response_message = await self.llm_service.call(dump_messages(messages))
 
             # Process response to handle structured content blocks
             response_message = process_llm_response(response_message)
@@ -254,7 +245,7 @@ class LangGraphAgent:
             logger.info(
                 "llm_response_generated",
                 session_id=thread_id,
-                model=model_name,
+                model=(response_message.response_metadata or {}).get("model_name"),
                 environment=settings.ENVIRONMENT.value,
             )
 
@@ -270,14 +261,13 @@ class LangGraphAgent:
                 self._check_citations(state.messages, checked.text)
 
             return Command(update={"messages": [response_message]}, goto=goto)
-        except Exception as e:
-            logger.error(
-                "llm_call_failed_all_models",
-                session_id=thread_id,
-                error=str(e),
-                environment=settings.ENVIRONMENT.value,
+        except Exception:
+            # Re-raise the original error: its class (AllProvidersFailedError, a client error) is
+            # what callers and the stale-if-error path need, and the traceback stays intact.
+            logger.exception(
+                "llm_call_failed_all_models", session_id=thread_id, environment=settings.ENVIRONMENT.value
             )
-            raise Exception(f"failed to get llm response after trying all models: {str(e)}")
+            raise
 
     # Define our tool node
     async def _tool_call(self, state: GraphState) -> Command:
