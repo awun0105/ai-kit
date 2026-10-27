@@ -262,12 +262,16 @@ class Harness:
         self._post("revision.undone", {"revision": revision, "new_revision": result.revision})
         return result.revision
 
-    def state(self, task_id: str) -> TaskState:
-        """The task's current state."""
+    def task(self, task_id: str) -> TaskRuntime:
+        """The task's runtime record (goal, draft, tools called, effects)."""
         task = self._tasks.get(task_id)
         if task is None:
             raise RpcError(APP_ERROR, "unknown task")
-        return task.machine.state
+        return task
+
+    def state(self, task_id: str) -> TaskState:
+        """The task's current state."""
+        return self.task(task_id).machine.state
 
     async def wait(self, task_id: str) -> TaskState:
         """Wait until the task ends; returns its final state."""
@@ -305,8 +309,8 @@ class Harness:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("harness_task_failed", task_id=task.id)
-            if task.machine.active:
+            if task.machine.active:  # an auto-review conflict has already ended the task
+                logger.exception("harness_task_failed", task_id=task.id)
                 self._move(task, TaskState.failed)
                 await self._finish(task)
 

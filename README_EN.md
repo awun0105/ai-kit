@@ -43,7 +43,7 @@ can start from the whole app or copy a single part into an existing codebase.
 - **RAG:** ingest md, txt, pdf, docx and html; hybrid search (pgvector + BM25 with Vietnamese word segmentation); optional reranker; answers with checked citations.
 - **Guardrails:** prompt-injection and PII rails in English and Vietnamese, an optional LLM policy rail, approval for risky tools, an egress allowlist, redaction while streaming.
 - **Reliability:** one retry layer with a retry budget, per-model circuit breakers, a fallback ladder across models, an answer cache that serves stale answers when providers are down.
-- **Tools and agents:** MCP client and server, A2A server and client, a deep-research team, an ACP agent (embed the kit's agent in Zed, JetBrains or your own app), `ResilientChatModel` for any LangChain agent.
+- **Tools and agents:** MCP client and server, A2A server and client, a deep-research team, an ACP agent (embed the kit's agent in Zed, JetBrains or your own app), an in-app agent harness (an agent works inside an app in any language through drafts, review and undo), `ResilientChatModel` for any LangChain agent.
 - **Offline:** runs on the user's machine with no server: SQLite checkpoints and knowledge base, in-process embeddings (FastEmbed), local models through Ollama or llama.cpp.
 - **Evaluation:** golden sets with retrieval metrics, a separate judge model, tool-call checks, repeated runs, simulated multi-turn users and CI gates.
 - **Delivery:** non-root Docker image, release to GHCR after a Trivy scan, Prometheus alerts, a per-user monthly cost limit.
@@ -126,7 +126,7 @@ such as `--runs 3` and `--scenarios` are in [docs/evaluation.md](docs/evaluation
 Start with [docs/ROADMAP.md](docs/ROADMAP.md): every part, its status and where it came from.
 Each part has its own page: [RAG](docs/rag.md), [guardrails](docs/guardrails.md),
 [reliability](docs/reliability.md), [tools](docs/tools.md), [agents](docs/agents.md),
-[evaluation](docs/evaluation.md), [conversation history](docs/compaction.md), [offline](docs/offline.md),
+[evaluation](docs/evaluation.md), [conversation history](docs/compaction.md), [offline](docs/offline.md), [in-app harness](docs/harness.md),
 [deployment](docs/deployment.md). Settings are in [docs/configuration.md](docs/configuration.md);
 coding rules for people and coding agents are in [AGENTS.md](AGENTS.md).
 

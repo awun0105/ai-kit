@@ -1,6 +1,6 @@
 # Harness cho agent trong app (in-app agent harness)
 
-Ngày: 2026-10-27. Trạng thái: bản nháp, chờ duyệt; còn 3 câu hỏi cho người dùng (mục 13).
+Ngày: 2026-10-27. Trạng thái: đã duyệt và đã làm (bản mẫu Python, xem `docs/harness.md`).
 
 ## 1. Mục đích
 
@@ -41,7 +41,6 @@ của app, hoặc chạy luôn bản Python làm sidecar nếu app chấp nhận
 - Kênh riêng cho Claude Code (stream-json) và Codex (app-server) như fframes có. Đợt này đi qua ACP,
   dùng adapter có sẵn (`claude-code-acp`, `codex-acp`).
 - Giao diện người dùng (khung chat, xem diff). Harness chỉ cung cấp sự kiện và dữ liệu để app tự vẽ.
-- Bộ offline (SQLite, embedding trong process). Đó là dự án riêng, làm sau.
 - Sandbox (cô lập) tiến trình agent ở mức hệ điều hành như fframes làm (job object, process group).
   Ghi rõ trong spec là chưa có.
 
@@ -104,7 +103,7 @@ Mọi hợp đồng là JSON-RPC 2.0, mỗi bản tin một dòng JSON. Tên met
 | `draft.commit(draft_id, base_revision)` | Áp dụng draft thành revision mới; trả `conflict` nếu base đã đổi |
 | `draft.discard(draft_id)` | Bỏ draft |
 | `revision.undo(revision)` | Tạo draft đảo ngược một revision, đi qua validate như mọi draft khác |
-| `draft.materialize(draft_id)` | Tùy chọn. Xuất draft ra một thư mục làm việc và trả đường dẫn, cho agent bên ngoài (mục 5.7) |
+| `draft.materialize(draft_id, path)` | Tùy chọn. Ghi draft thành file vào thư mục `path` do harness tạo, thay cho nội dung cũ (mục 5.7) |
 | `draft.sync(draft_id)` | Tùy chọn. Đọc lại thư mục làm việc vào draft; trả lỗi có cấu trúc nếu file không hợp lệ |
 | `effect.run(revision, effect)` | Chạy một thao tác `dangerous` đã duyệt, chỉ sau khi revision được commit (mục 5.5) |
 
@@ -179,8 +178,9 @@ transcript, log hay sự kiện gửi UI. Không lưu giá trị API key; chỉ 
 Claude Code, Codex và các agent tương tự tự đọc, sửa file và chạy lệnh, không qua tool của harness.
 Để chúng không chạm dữ liệu thật, harness chạy chúng trong **thư mục làm việc của draft**, như fframes:
 
-1. Khi task bắt đầu, harness gọi `draft.materialize` để có thư mục làm việc, rồi khởi động agent với
-   `cwd` là thư mục đó.
+1. Khi task bắt đầu, harness tạo thư mục làm việc, gọi `draft.materialize` để app ghi draft vào đó,
+   rồi khởi động agent với `cwd` là thư mục đó. Trước mỗi lần gọi tool, harness gọi `draft.sync`;
+   sau mỗi tool `write`, harness gọi lại `draft.materialize`, để file và tool cùng thấy một draft.
 2. Yêu cầu đọc, ghi file và mở terminal của agent ACP (`fs/*`, `terminal/*`) đi qua harness, và bị
    từ chối nếu đường dẫn nằm ngoài thư mục làm việc.
 3. Hết lượt, harness gọi `draft.sync` rồi `draft.validate`; từ đây đi tiếp như mọi draft.

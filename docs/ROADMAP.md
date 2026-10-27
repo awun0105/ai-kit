@@ -25,6 +25,7 @@ LLM-as-judge evals, Docker Compose.
 | 9 | Toolbox hardening: each component imports on its own (wiring in `app/core/kit.py`, checked by `tests/test_toolbox_imports.py`), safe defaults when plugged in (`guard_tools`, `nostream` rail, `AnswerCache(shared=...)`, per-caller A2A, timeout budget check), a "When you plug it in" and "Copy this module" section in every layer doc | done | review of the kit |
 | 10 | Lessons from Google ADK: history budget fix and compaction ([docs/compaction.md](compaction.md)); tool trajectory, repeated runs, efficiency gates, judge samples, simulated users ([docs/evaluation.md](evaluation.md)) | done | google/adk-python `2084efb` (ideas, rewritten) |
 | 11 | Embedding: the kit's agent as an ACP agent ([docs/tools.md](tools.md#acp-agent)); offline extra: SQLite checkpoints and vector store, FastEmbed, models from settings ([docs/offline.md](offline.md)) | done | agentclientprotocol/python-sdk; fframes Studio driver model |
+| 12 | In-app agent harness: adapter protocol, drafts, permissions with deferred dangerous effects, working directories for external ACP agents, MCP bridge, kit agent driver, sample notes app, adapter and harness conformance suites, in-app eval — [docs/harness.md](harness.md) | done | fframes Studio `a8dc7985` (design, rewritten) |
 
 ## Rules for every layer
 
