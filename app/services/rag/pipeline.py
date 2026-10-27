@@ -97,6 +97,7 @@ class RAGPipeline:
         self._bm25: BM25Index | None = None
         self._bm25_stale = True
         self._bm25_built_at = 0.0
+        self._bm25_lock = asyncio.Lock()
 
     async def ingest(self, documents: list[Document], prune_missing: bool = False) -> IngestReport:
         """Chunk, embed and upsert documents. Unchanged chunks are not re-embedded.
@@ -143,12 +144,23 @@ class RAGPipeline:
             for c in chunks
         ]
 
-    async def _lexical_index(self) -> BM25Index:
+    def _lexical_outdated(self) -> bool:
         expired = time.monotonic() - self._bm25_built_at > self._lexical_ttl
-        if self._bm25 is None or self._bm25_stale or expired:
-            self._bm25 = BM25Index(await self.store.all_chunks(), mode=self._tokenizer, reuse=self._bm25)
-            self._bm25_stale = False
-            self._bm25_built_at = time.monotonic()
+        return self._bm25 is None or self._bm25_stale or expired
+
+    async def _lexical_index(self) -> BM25Index:
+        """Return the BM25 index, rebuilding it once however many queries arrive meanwhile.
+
+        Building tokenizes and indexes the whole corpus (CPU-bound), so it runs in a thread.
+        """
+        if self._lexical_outdated():
+            async with self._bm25_lock:
+                if self._lexical_outdated():  # another query may have rebuilt it while this one waited
+                    self._bm25_stale = False  # before loading, so an ingest during the load marks it again
+                    chunks = await self.store.all_chunks()
+                    self._bm25 = await asyncio.to_thread(BM25Index, chunks, self._tokenizer, self._bm25)
+                    self._bm25_built_at = time.monotonic()
+        assert self._bm25 is not None
         return self._bm25
 
     async def retrieve(self, query: str, top_k: int | None = None) -> RetrievalResult:

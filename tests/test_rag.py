@@ -1,5 +1,7 @@
 """RAG layer tests. Everything runs offline with the hashing embedder and the in-memory store."""
 
+import asyncio
+
 import pytest
 from langchain_core.messages import (
     AIMessage,
@@ -145,6 +147,23 @@ async def test_reingest_drops_chunks_a_shorter_document_no_longer_has():
     assert [c.id for c in chunks] == ["faq.md::chunk-0"]
     assert report.removed_chunks > 0 and report.changed_documents == ["faq.md"]
     assert all("Old fact" not in r.chunk.content for r in result.results)
+
+
+async def test_concurrent_queries_rebuild_the_lexical_index_once(pipeline, monkeypatch):
+    await pipeline.ingest(DOCS)
+    loads = []
+    all_chunks = pipeline.store.all_chunks
+
+    async def counted():
+        loads.append(1)
+        await asyncio.sleep(0.01)  # let the other queries arrive while the corpus loads
+        return await all_chunks()
+
+    monkeypatch.setattr(pipeline.store, "all_chunks", counted)
+
+    await asyncio.gather(*[pipeline.retrieve("refund policy") for _ in range(5)])
+
+    assert loads == [1]
 
 
 async def test_prune_removes_documents_missing_from_the_corpus(pipeline):

@@ -90,7 +90,8 @@ Leave reranking off unless a golden-set evaluation shows it helps.
 ## Limits and next steps
 
 - BM25 runs in process over all stored chunks (index reloaded at most every 5 minutes
-  or after an ingest). Fine for tens of thousands of chunks; beyond that move the
+  or after an ingest; one rebuild at a time, in a worker thread, however many queries
+  arrive meanwhile). Fine for tens of thousands of chunks; beyond that move the
   lexical side into Postgres full-text search, as [R2R](https://github.com/SciPhi-AI/R2R) does.
 - Not implemented yet: query expansion / HyDE, parent-child chunks, contextual
   enrichment (D18 lab, module 5), GraphRAG (D19 lab; see LightRAG).
