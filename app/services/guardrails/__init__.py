@@ -6,6 +6,8 @@ from typing import (
     cast,
 )
 
+from langgraph.constants import TAG_NOSTREAM
+
 from app.core.config import settings
 from app.services.llm import llm_service
 from app.services.guardrails.detectors import (
@@ -46,7 +48,10 @@ def build_guardrails_from_settings() -> Guardrails:
         model = settings.GUARD_LLM_RAIL_MODEL or None
 
         async def classify(messages: list[dict], schema: type[PolicyVerdict]) -> PolicyVerdict:
-            return await llm_service.call(messages, model_name=model, response_format=schema)
+            # nostream: the verdict must never reach a client reading the graph's message stream.
+            return await llm_service.call(
+                messages, model_name=model, response_format=schema, config={"tags": [TAG_NOSTREAM]}
+            )
 
         llm_rail = LLMPolicyRail(
             settings.GUARD_LLM_RAIL_POLICY, classify, fail_mode=cast(Literal["open", "closed"], fail_mode)

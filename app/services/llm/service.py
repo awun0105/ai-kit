@@ -108,6 +108,7 @@ class LLMService:
         messages: LanguageModelInput,
         model_name: Optional[str] = ...,
         response_format: None = ...,
+        config: Optional[RunnableConfig] = ...,
         **model_kwargs: Any,
     ) -> BaseMessage: ...
 
@@ -118,6 +119,7 @@ class LLMService:
         model_name: Optional[str] = ...,
         *,
         response_format: Type[T],
+        config: Optional[RunnableConfig] = ...,
         **model_kwargs: Any,
     ) -> T: ...
 
@@ -126,6 +128,7 @@ class LLMService:
         messages: LanguageModelInput,
         model_name: Optional[str] = None,
         response_format: Optional[Type[BaseModel]] = None,
+        config: Optional[RunnableConfig] = None,
         **model_kwargs: Any,
     ) -> Union[BaseMessage, BaseModel]:
         """Call the LLM through the fallback ladder.
@@ -135,6 +138,8 @@ class LLMService:
             model_name: Start the ladder at this model. ``None`` uses the default.
             response_format: Pydantic schema for structured output; the call
                 returns a validated instance instead of a ``BaseMessage``.
+            config: Runnable config for the provider call, e.g. ``{"tags": ["nostream"]}``
+                so an internal call (a classifier) never shows up in a token stream.
             **model_kwargs: Extra kwargs forwarded to ``LLMRegistry.get`` when
                 building one-off model instances (e.g. ``temperature``).
 
@@ -154,7 +159,7 @@ class LLMService:
             raise ValueError(f"model '{model_name}' not found in registry. available models: {', '.join(all_names)}")
         try:
             result = await asyncio.wait_for(
-                self.invoker.invoke(self._ladder(messages, model_name, response_format, model_kwargs)),
+                self.invoker.invoke(self._ladder(messages, model_name, response_format, model_kwargs, config)),
                 timeout=settings.LLM_TOTAL_TIMEOUT,
             )
         except asyncio.TimeoutError:
@@ -247,6 +252,7 @@ class LLMService:
         model_name: Optional[str],
         response_format: Optional[Type[BaseModel]],
         model_kwargs: dict,
+        config: Optional[RunnableConfig] = None,
     ) -> list[tuple[str, Callable[[], Awaitable[Any]]]]:
         names = LLMRegistry.get_all_names()
         start = names.index(model_name or self._primary)
@@ -260,14 +266,14 @@ class LLMService:
                 def one_off_attempt(name: str = name) -> Awaitable[Any]:
                     base = LLMRegistry.get(name, **model_kwargs)
                     runnable = base.with_structured_output(response_format) if response_format else base
-                    return runnable.ainvoke(messages)
+                    return runnable.ainvoke(messages, config=config)
 
                 rungs.append((name, one_off_attempt))
             elif not self._bound_tools or name in self._bound:  # skip models that cannot call tools
                 runnable = self._bound.get(name) or LLMRegistry.get(name)
 
                 def bound_attempt(runnable: Any = runnable) -> Awaitable[Any]:
-                    return runnable.ainvoke(messages)
+                    return runnable.ainvoke(messages, config=config)
 
                 rungs.append((name, bound_attempt))
         return rungs

@@ -4,23 +4,32 @@ import json
 from pathlib import Path
 
 import pytest
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import (
     AIMessage,
+    AIMessageChunk,
     HumanMessage,
     ToolMessage,
 )
+from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+import app.services.guardrails as guardrails_module
 from app.core.langgraph.graph import LangGraphAgent
 from app.services.guardrails import (
     Guardrails,
     LLMPolicyRail,
+    build_guardrails_from_settings,
     find_injections,
     is_affirmative,
     normalize_for_security,
     set_guardrails,
+)
+from app.services.llm import (
+    LLMRegistry,
+    LLMService,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "guardrails"
@@ -201,6 +210,49 @@ async def test_refusal_is_visible_in_message_stream(monkeypatch):
     ]
 
     assert "REFUSED" in streamed
+
+
+class JsonModel(FakeListChatModel):
+    """Fake provider model whose structured output parses its JSON reply."""
+
+    def with_structured_output(self, schema, **kwargs):  # type: ignore[override]
+        return self | RunnableLambda(lambda message: schema.model_validate_json(message.content))
+
+
+async def test_llm_rail_verdict_never_reaches_the_message_stream(monkeypatch):
+    # The classifier runs inside the input_guard node; without the nostream tag its JSON verdict
+    # was streamed to the client ahead of the answer.
+    verdict = '{"allowed": true, "category": "ok", "reason": "RAIL_VERDICT"}'
+    monkeypatch.setattr(LLMRegistry, "get", lambda name, **kwargs: JsonModel(responses=[verdict]))
+    monkeypatch.setattr(guardrails_module.settings, "GUARD_LLM_RAIL_ENABLED", True)
+    set_guardrails(build_guardrails_from_settings())
+
+    agent = LangGraphAgent()
+    answer_model = FakeListChatModel(responses=["the real answer"])
+    real_call = LLMService.call
+
+    async def call(messages, model_name=None, response_format=None, config=None, **kwargs):
+        if response_format is not None:  # the rail: go through the real service and its config
+            return await real_call(agent.llm_service, messages, model_name, response_format, config=config, **kwargs)
+        return await answer_model.ainvoke(messages)
+
+    monkeypatch.setattr(agent.llm_service, "call", call)
+    graph = await agent.create_graph(checkpointer=InMemorySaver())
+
+    streamed = "".join(
+        [
+            str(token.content)
+            async for token, _ in graph.astream(
+                {"messages": [HumanMessage(content="hello")]},
+                {"configurable": {"thread_id": "rail"}},
+                stream_mode="messages",
+            )
+            if isinstance(token, (AIMessage, AIMessageChunk))
+        ]
+    )
+
+    assert "RAIL_VERDICT" not in streamed
+    assert "the real answer" in streamed
 
 
 transfers: list[dict] = []

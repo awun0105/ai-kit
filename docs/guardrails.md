@@ -34,6 +34,9 @@ Measured with the D24 Eval-Guard fixtures (`tests/fixtures/guardrails/`), see
 The 6 attacks regex cannot catch are semantic: off-topic requests (poems, recipes,
 crypto prices, maths, films) and asking for someone else's ID number. That is the
 LLM rail's job, configured with a one-sentence scope in `GUARD_LLM_RAIL_POLICY`.
+The classifier call is tagged `nostream` (`llm_service.call(..., config={"tags": ["nostream"]})`):
+it runs inside the graph's `input_guard` node, and without the tag LangGraph's message stream
+would send its JSON verdict to the client ahead of the answer.
 
 Detected data: email, Vietnamese phone numbers (`0…`, `+84…`, with separators),
 CCCD (12 digits, province code checked), CMND (9 digits, only next to an ID keyword
