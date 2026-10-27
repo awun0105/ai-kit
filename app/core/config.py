@@ -166,6 +166,12 @@ class Settings:
         self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))  # per model reply
         # Conversation history sent with each call; the current turn is always sent whole.
         self.HISTORY_MAX_TOKENS = int(os.getenv("HISTORY_MAX_TOKENS", "16000"))
+        # Summarize the oldest turns instead of dropping them (see docs/compaction.md); one extra
+        # model call when it triggers, so it is off by default.
+        self.HISTORY_COMPACTION_ENABLED = os.getenv("HISTORY_COMPACTION_ENABLED", "false").lower() == "true"
+        self.HISTORY_COMPACTION_TRIGGER_TOKENS = int(os.getenv("HISTORY_COMPACTION_TRIGGER_TOKENS", "12000"))
+        self.HISTORY_COMPACTION_KEEP_TOKENS = int(os.getenv("HISTORY_COMPACTION_KEEP_TOKENS", "4000"))
+        self.HISTORY_COMPACTION_MODEL = os.getenv("HISTORY_COMPACTION_MODEL", "")  # "" = the default model
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "2"))
         # Must fit MAX_LLM_CALL_RETRIES x LLM_ATTEMPT_TIMEOUT plus one fallback attempt (checked at startup).
         self.LLM_TOTAL_TIMEOUT = float(os.getenv("LLM_TOTAL_TIMEOUT", "90"))

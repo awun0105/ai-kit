@@ -20,6 +20,7 @@ TOOLBOX = [
     "app.services.mcp",
     "app.services.agents",
     "app.services.cost_guard",
+    "app.services.compaction",
 ]
 APP_MODULES = ["app.core.config", "app.core.logging", "app.services.llm", "app.services.database", "app.core.kit"]
 

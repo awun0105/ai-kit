@@ -33,6 +33,10 @@ cp .env.example .env.development
 | `DEFAULT_LLM_TEMPERATURE` | `0.2` | No | Temperature for chat completions |
 | `MAX_TOKENS` | `2000` | No | Max tokens per LLM response |
 | `HISTORY_MAX_TOKENS` | `16000` | No | Conversation history sent with each call, oldest turns dropped first; the current turn (question plus tool results) is always sent whole |
+| `HISTORY_COMPACTION_ENABLED` | `false` | No | Summarize the oldest turns instead of dropping them ([compaction](compaction.md)) |
+| `HISTORY_COMPACTION_TRIGGER_TOKENS` | `12000` | No | Unsummarized history size that triggers a summary; at most `HISTORY_MAX_TOKENS` |
+| `HISTORY_COMPACTION_KEEP_TOKENS` | `4000` | No | Newest history kept word for word |
+| `HISTORY_COMPACTION_MODEL` | `""` | No | Summarizer model (empty = default model) |
 | `MAX_LLM_CALL_RETRIES` | `2` | No | Attempts per model before switching to fallback |
 | `LLM_TOTAL_TIMEOUT` | `90` | No | Max seconds for the entire fallback loop; must fit retries x attempt timeout + one fallback attempt |
 | `SESSION_NAMING_ENABLED` | `true` | No | Auto-generate a session title from the user's first message using an LLM background task |

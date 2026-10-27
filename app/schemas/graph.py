@@ -16,3 +16,5 @@ class GraphState(BaseModel):
         default_factory=list, description="The messages in the conversation"
     )
     long_term_memory: str = Field(default="", description="The long term memory of the conversation")
+    summary: str = Field(default="", description="Summary of the oldest messages (history compaction)")
+    summary_through: str = Field(default="", description="Id of the last message the summary covers")

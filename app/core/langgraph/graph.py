@@ -52,6 +52,7 @@ from app.core.kit import (
     get_answer_cache,
     get_cost_guard,
     get_guardrails,
+    get_history_compactor,
 )
 from app.core.langgraph.tools import tools
 from app.core.logging import logger
@@ -64,6 +65,10 @@ from app.core.prompts import load_system_prompt
 from app.schemas import (
     GraphState,
     Message,
+)
+from app.services.compaction import (
+    HistoryCompactor,
+    HistorySummary,
 )
 from app.services.guardrails import is_affirmative
 from app.services.llm import llm_service
@@ -242,8 +247,22 @@ class LangGraphAgent:
             username=username, long_term_memory=NO_MEMORY if neutral else state.long_term_memory
         )
 
+        # Long conversations: the oldest turns are sent as a summary instead of being dropped.
+        history: list = state.messages
+        summary_update: dict = {}
+        compactor = get_history_compactor()
+        if compactor is not None:
+            summary = HistorySummary(text=state.summary, through_id=state.summary_through) if state.summary else None
+            new_summary = await compactor.compact(state.messages, summary)
+            if new_summary is not None:
+                summary = new_summary
+                summary_update = {"summary": new_summary.text, "summary_through": new_summary.through_id}
+            if summary is not None:
+                history = HistoryCompactor.unsummarized(state.messages, summary)
+                SYSTEM_PROMPT += f"\n\n# Earlier in this conversation (summary)\n{summary.text}"
+
         # Prepare messages with system prompt
-        messages = prepare_messages(state.messages, SYSTEM_PROMPT)
+        messages = prepare_messages(history, SYSTEM_PROMPT)
 
         try:
             # One resilient call: retries, breakers and fallback across models happen inside,
@@ -271,7 +290,7 @@ class LangGraphAgent:
                     response_message.content = checked.text
                 self._check_citations(state.messages, checked.text)
 
-            return Command(update={"messages": [response_message]}, goto=goto)
+            return Command(update={"messages": [response_message], **summary_update}, goto=goto)
         except Exception:
             # Re-raise the original error: its class (AllProvidersFailedError, a client error) is
             # what callers and the stale-if-error path need, and the traceback stays intact.

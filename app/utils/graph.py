@@ -47,6 +47,11 @@ def _count_tokens_tiktoken(messages: list) -> int:
     return num_tokens
 
 
+def count_tokens(messages: list[BaseMessage]) -> int:
+    """Tokens of a list of messages with the default model's tokenizer (no API call)."""
+    return _count_tokens_tiktoken(messages)
+
+
 def dump_messages(messages: list[Message]) -> list[dict]:
     """Dump the messages to a list of dictionaries.
 

@@ -12,7 +12,8 @@ costs money or changes behaviour:
 | Reliability | One retry layer with classified errors, jitter and a retry budget, per-model circuit breakers, fallback ladder, answer cache with stale-if-error, SLO burn-rate alerts | [reliability](docs/reliability.md) |
 | Tools | Load MCP server tools, serve the knowledge base over MCP, serve the agent and call other agents over A2A | [tools](docs/tools.md) |
 | Agents | `ResilientChatModel` for any LangChain agent, a deep-research team (lead + researchers) on deepagents, citation checks | [agents](docs/agents.md) |
-| Evaluation | Golden-set evaluation: retrieval metrics, the real agent graded by a separate judge, judge-bias controls, CI gates | [evaluation](docs/evaluation.md) |
+| Evaluation | Golden-set evaluation: retrieval metrics, the real agent graded by a separate judge, tool trajectories, repeated runs, simulated multi-turn users, judge-bias controls, CI gates | [evaluation](docs/evaluation.md) |
+| History | Per-call history budget that never drops the current turn; optional rolling summary of the oldest turns | [compaction](docs/compaction.md) |
 | Delivery | Gated release to GHCR with SBOM and Trivy, nightly evals, non-root multi-stage image, per-user cost guard | [deployment](docs/deployment.md) |
 
 ## Start a new app
@@ -42,7 +43,7 @@ Update a generated app with later kit improvements: `uvx copier update --trust`.
 ### Take one component into another project
 
 Each layer under `app/services/` (rag, guardrails, reliability, evaluation, mcp, a2a, agents,
-cost_guard) imports on its own: no settings, database or model registry, which
+cost_guard, compaction) imports on its own: no settings, database or model registry, which
 `tests/test_toolbox_imports.py` checks. Copy the package with its tests and follow the
 **Copy this module** and **When you plug it in** sections of its doc; `app/core/kit.py` shows
 how the app builds each one from settings.
@@ -90,6 +91,7 @@ app/
     agents/               ResilientChatModel, deep-research team
     evaluation/           golden sets, retrieval metrics, judge, reports
     cost_guard.py         per-user monthly budget
+    compaction.py         summarize the oldest turns of long conversations
   mcp_server.py           the knowledge base as an MCP server
 scripts/                  bootstrap, ingest, eval_rag, research
 evals/                    Langfuse trace evaluator (base template) and datasets/ (golden sets)

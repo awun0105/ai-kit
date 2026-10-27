@@ -197,7 +197,8 @@ This is a production-ready AI agent application built with:
 The kit adds layers on top of the template; each has a doc in `docs/` and offline tests in `tests/`:
 RAG (`app/services/rag/`), guardrails (`app/services/guardrails/`), reliability (`app/services/reliability/`),
 MCP and A2A (`app/services/mcp/`, `app/services/a2a/`), agents (`app/services/agents/`), evaluation
-(`app/services/evaluation/`), cost guard (`app/services/cost_guard.py`). `docs/ROADMAP.md` lists them.
+(`app/services/evaluation/`), cost guard (`app/services/cost_guard.py`), history compaction
+(`app/services/compaction.py`). `docs/ROADMAP.md` lists them.
 
 - Each layer is a toolbox component that a project can copy on its own: it takes its configuration as constructor arguments and never imports `app.core.config`, `app.core.logging` (log with `structlog.get_logger()`), `app.services.llm` or `app.services.database`. Reading settings and keeping the process-wide instances (`build_*_from_settings`, `get_*`, `set_*`) belongs in `app/core/kit.py`; `tests/test_toolbox_imports.py` enforces it
 - Tools handed to a sub-agent or a `create_agent` loop are wrapped with `guard_tools(tools, guard)`; only the graph's tool node may call raw tools

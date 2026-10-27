@@ -4,7 +4,7 @@ The modules under ``app/services`` (rag, guardrails, reliability, evaluation, mc
 a2a, agents, cost_guard) take everything they need as constructor arguments and
 never read ``settings``, so each can be copied into another project on its own.
 This module is the one place that reads the ``RAG_*``, ``GUARD_*``, ``ANSWER_CACHE_*``,
-``COST_*`` and ``MCP_*`` settings, assembles the components and hands out the
+``COST_*``, ``HISTORY_COMPACTION_*`` and ``MCP_*`` settings, assembles the components and hands out the
 process-wide instances. Tests replace an instance with the matching ``set_*``.
 """
 
@@ -21,6 +21,10 @@ from langgraph.constants import TAG_NOSTREAM
 from app.core.cache import cache_service
 from app.core.config import settings
 from app.core.prompts import _SYSTEM_PROMPT_TEMPLATE
+from app.services.compaction import (
+    SUMMARY_PROMPT,
+    HistoryCompactor,
+)
 from app.services.cost_guard import (
     CostGuard,
     parse_prices,
@@ -53,6 +57,10 @@ from app.services.reliability import (
     InMemoryAnswerStore,
     PgVectorAnswerStore,
     scope_key,
+)
+from app.utils import (
+    count_tokens,
+    extract_text_content,
 )
 
 
@@ -240,6 +248,59 @@ def set_answer_cache(cache: Optional[AnswerCache]) -> None:
     """Replace the process-wide answer cache (used by tests)."""
     global _answer_cache, _answer_cache_built
     _answer_cache, _answer_cache_built = cache, True
+
+
+# ---------------------------------------------------------------- history compaction
+
+_history_compactor: Optional[HistoryCompactor] = None
+_history_compactor_built = False
+
+
+def build_history_compactor_from_settings() -> Optional[HistoryCompactor]:
+    """Return the configured history compactor, or None when compaction is off."""
+    if not settings.HISTORY_COMPACTION_ENABLED:
+        return None
+    if settings.HISTORY_COMPACTION_TRIGGER_TOKENS > settings.HISTORY_MAX_TOKENS:
+        # Trimming would drop the oldest turns before they ever reach the summarizer.
+        raise ValueError("HISTORY_COMPACTION_TRIGGER_TOKENS must not exceed HISTORY_MAX_TOKENS")
+    model = settings.HISTORY_COMPACTION_MODEL or None
+
+    async def summarize(previous: str, transcript: str) -> str:
+        # nostream: the summary must never reach a client reading the graph's message stream.
+        reply = await llm_service.call(
+            [
+                {"role": "system", "content": SUMMARY_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"PREVIOUS SUMMARY:\n{previous or '(none)'}\n\nNEW MESSAGES:\n{transcript}",
+                },
+            ],
+            model_name=model,
+            config={"tags": [TAG_NOSTREAM]},
+        )
+        return extract_text_content(reply.content)
+
+    return HistoryCompactor(
+        summarize,
+        trigger_tokens=settings.HISTORY_COMPACTION_TRIGGER_TOKENS,
+        keep_tokens=settings.HISTORY_COMPACTION_KEEP_TOKENS,
+        count_tokens=count_tokens,
+    )
+
+
+def get_history_compactor() -> Optional[HistoryCompactor]:
+    """Return the process-wide history compactor (None when off), building it on first use."""
+    global _history_compactor, _history_compactor_built
+    if not _history_compactor_built:
+        _history_compactor = build_history_compactor_from_settings()
+        _history_compactor_built = True
+    return _history_compactor
+
+
+def set_history_compactor(compactor: Optional[HistoryCompactor]) -> None:
+    """Replace the process-wide history compactor (used by tests)."""
+    global _history_compactor, _history_compactor_built
+    _history_compactor, _history_compactor_built = compactor, True
 
 
 # ---------------------------------------------------------------- cost guard
