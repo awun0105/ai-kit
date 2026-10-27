@@ -14,6 +14,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.api.v1 import chatbot
 from app.api.v1.auth import get_current_session
 from app.core.cache import InMemoryCacheService
+from app.core.kit import (
+    set_cost_guard,
+    set_guardrails,
+)
 from app.core.langgraph.graph import LangGraphAgent
 from app.main import app
 from app.schemas import Message
@@ -23,12 +27,10 @@ from app.services.cost_guard import (
     CostGuard,
     TurnUsage,
     parse_prices,
-    set_cost_guard,
 )
 from app.services.guardrails import (
     Guardrails,
     LLMPolicyRail,
-    set_guardrails,
 )
 from app.services.memory import memory_service
 from app.utils.tasks import _background_tasks

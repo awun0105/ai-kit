@@ -1,9 +1,6 @@
-"""This file contains the services for the application."""
+"""Services: the app's own (llm, memory, database) and the toolbox components.
 
-from app.services.database import database_service
-from app.services.llm import (
-    LLMRegistry,
-    llm_service,
-)
-
-__all__ = ["database_service", "LLMRegistry", "llm_service"]
+Import each from its own module. This package imports nothing, so pulling in one
+toolbox component (rag, guardrails, reliability, evaluation, mcp, a2a, agents,
+cost_guard) never drags in the database, the model registry or the settings.
+"""

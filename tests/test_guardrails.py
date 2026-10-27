@@ -16,16 +16,18 @@ from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
-import app.services.guardrails as guardrails_module
+import app.core.kit as kit
+from app.core.kit import (
+    build_guardrails_from_settings,
+    set_guardrails,
+)
 from app.core.langgraph.graph import LangGraphAgent
 from app.services.guardrails import (
     Guardrails,
     LLMPolicyRail,
-    build_guardrails_from_settings,
     find_injections,
     is_affirmative,
     normalize_for_security,
-    set_guardrails,
 )
 from app.services.llm import (
     LLMRegistry,
@@ -224,7 +226,7 @@ async def test_llm_rail_verdict_never_reaches_the_message_stream(monkeypatch):
     # was streamed to the client ahead of the answer.
     verdict = '{"allowed": true, "category": "ok", "reason": "RAIL_VERDICT"}'
     monkeypatch.setattr(LLMRegistry, "get", lambda name, **kwargs: JsonModel(responses=[verdict]))
-    monkeypatch.setattr(guardrails_module.settings, "GUARD_LLM_RAIL_ENABLED", True)
+    monkeypatch.setattr(kit.settings, "GUARD_LLM_RAIL_ENABLED", True)
     set_guardrails(build_guardrails_from_settings())
 
     agent = LangGraphAgent()

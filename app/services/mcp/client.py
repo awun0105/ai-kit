@@ -22,9 +22,10 @@ from typing import (
 
 from langchain_core._api import LangChainBetaWarning
 from langchain_core.tools import BaseTool
+import structlog
 
-from app.core.config import settings
-from app.core.logging import logger
+logger = structlog.get_logger()
+
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", LangChainBetaWarning)
@@ -71,11 +72,3 @@ class MCPToolkit:
         if self._open:
             await self._adapter.__aexit__(None, None, None)
             self._open = False
-
-
-def build_toolkit_from_settings() -> Optional[MCPToolkit]:
-    """Return a toolkit for ``MCP_CONFIG_FILE``, or None when MCP is not configured."""
-    if not settings.MCP_CONFIG_FILE:
-        return None
-    allowlist = set(settings.MCP_TOOL_ALLOWLIST) or None
-    return MCPToolkit(load_mcp_config(settings.MCP_CONFIG_FILE), allowlist=allowlist)

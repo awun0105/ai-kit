@@ -10,11 +10,11 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from app.services.rag import (
+from app.core.kit import (
+    build_answer_cache_from_settings,
     build_pipeline_from_settings,
-    format_context,
 )
-from app.services.reliability import build_answer_cache_from_settings
+from app.services.rag import format_context
 from app.services.rag.chunking import load_documents
 
 

@@ -64,7 +64,8 @@ The rails above live in the chat graph's tool node. A sub-agent (the deep-resear
 `create_agent` loop) runs its tools itself, so wrap them first:
 
 ```python
-from app.services.guardrails import get_guardrails, guard_tools
+from app.core.kit import get_guardrails          # the app's rails, built from GUARD_* settings
+from app.services.guardrails import guard_tools
 
 agent = create_agent(model, tools=guard_tools(my_tools, get_guardrails()))
 ```

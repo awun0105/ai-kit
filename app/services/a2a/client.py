@@ -28,8 +28,9 @@ from langchain_core.tools import (
     BaseTool,
     StructuredTool,
 )
+import structlog
 
-from app.core.logging import logger
+logger = structlog.get_logger()
 
 
 def parse_remote_agents(entries: list[str]) -> dict[str, str]:

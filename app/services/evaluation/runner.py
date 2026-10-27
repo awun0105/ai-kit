@@ -19,8 +19,8 @@ from pydantic import (
     BaseModel,
     Field,
 )
+import structlog
 
-from app.core.logging import logger
 from app.services.evaluation.dataset import GoldenItem
 from app.services.evaluation.judge import (
     AnswerGrade,
@@ -36,7 +36,15 @@ from app.services.rag.citations import (
     check_answer,
     cited_labels,
 )
-from app.utils import extract_text_content
+
+logger = structlog.get_logger()
+
+
+def _text(content: str | list) -> str:
+    """Plain text of a message content (a string, or content blocks from reasoning models)."""
+    if isinstance(content, str):
+        return content
+    return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
 
 
 class ItemResult(BaseModel):
@@ -118,12 +126,8 @@ async def evaluate_answers(
         result.latency_s = round(time.perf_counter() - started, 3)
         messages = state["messages"]
         final = messages[-1]
-        result.answer = extract_text_content(final.content) if isinstance(final, AIMessage) else ""
-        contexts = [
-            extract_text_content(m.content)
-            for m in messages
-            if isinstance(m, ToolMessage) and m.name == "knowledge_search"
-        ]
+        result.answer = _text(final.content) if isinstance(final, AIMessage) else ""
+        contexts = [_text(m.content) for m in messages if isinstance(m, ToolMessage) and m.name == "knowledge_search"]
         source_count = max((max(cited_labels(c), default=0) for c in contexts), default=0)
         result.citations_out_of_range = check_answer(result.answer, source_count).out_of_range if source_count else []
         if judge is not None:

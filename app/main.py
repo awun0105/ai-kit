@@ -21,6 +21,10 @@ from app.api.v1.api import api_router
 from app.api.v1.chatbot import agent
 from app.core.cache import cache_service
 from app.core.config import settings
+from app.core.kit import (
+    build_toolkit_from_settings,
+    get_guardrails,
+)
 from app.core.limiter import limiter
 from app.core.logging import logger
 from app.core.metrics import setup_metrics
@@ -30,12 +34,10 @@ from app.core.middleware import (
     ProfilingMiddleware,
 )
 from app.core.observability import langfuse_init
+from app.services.agents import ResilientChatModel
 from app.services.database import database_service
-from app.services.guardrails import (
-    get_guardrails,
-    guard_tools,
-)
-from app.services.mcp import build_toolkit_from_settings
+from app.services.guardrails import guard_tools
+from app.services.llm import llm_service
 from app.services.memory import memory_service
 
 # Load environment variables
@@ -106,6 +108,7 @@ async def lifespan(app: FastAPI):
             agent.register_tools(
                 [
                     build_deep_research_tool(
+                        ResilientChatModel(service=llm_service),
                         guard_tools(sources, get_guardrails()),
                         settings.DEEP_RESEARCH_MAX_MODEL_CALLS,
                         settings.DEEP_RESEARCH_MAX_TOOL_CALLS,

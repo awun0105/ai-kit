@@ -22,10 +22,10 @@ from typing import (
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import LLMResult
+import structlog
 
-from app.core.cache import cache_service
-from app.core.config import settings
-from app.core.logging import logger
+logger = structlog.get_logger()
+
 
 KEY_TTL_SECONDS = 40 * 24 * 3600  # keep last month's total around for reconciliation
 
@@ -155,25 +155,3 @@ def parse_prices(raw: str) -> dict[str, tuple[float, float]]:
         return {}
     data = json.loads(raw)
     return {str(model): (float(p[0]), float(p[1])) for model, p in data.items()}
-
-
-_guard: Optional[CostGuard] = None
-
-
-def get_cost_guard() -> CostGuard:
-    """Process-wide guard built from the COST_* settings."""
-    global _guard
-    if _guard is None:
-        _guard = CostGuard(
-            cache_service,
-            settings.COST_MONTHLY_BUDGET_USD,
-            parse_prices(settings.COST_PRICES_JSON),
-            (settings.COST_DEFAULT_INPUT_PER_1M, settings.COST_DEFAULT_OUTPUT_PER_1M),
-        )
-    return _guard
-
-
-def set_cost_guard(guard: Optional[CostGuard]) -> None:
-    """Replace the process-wide guard (used by tests)."""
-    global _guard
-    _guard = guard

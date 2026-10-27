@@ -10,6 +10,7 @@ from langchain_core.messages import (
 )
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.core.kit import set_rag_pipeline
 from app.core.langgraph.graph import LangGraphAgent
 from app.core.langgraph.tools.knowledge_search import knowledge_search
 from app.services.rag import (
@@ -18,7 +19,6 @@ from app.services.rag import (
     InMemoryVectorStore,
     RAGPipeline,
     format_context,
-    set_rag_pipeline,
 )
 from app.services.rag.chunking import (
     chunk_documents,

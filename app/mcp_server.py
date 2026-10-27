@@ -17,11 +17,11 @@ from fastmcp import FastMCP
 from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 from app.core.config import settings
-from app.services.guardrails import get_guardrails
-from app.services.rag import (
-    format_context,
+from app.core.kit import (
+    get_guardrails,
     get_rag_pipeline,
 )
+from app.services.rag import format_context
 
 
 def build_server(token: Optional[str] = None) -> FastMCP:

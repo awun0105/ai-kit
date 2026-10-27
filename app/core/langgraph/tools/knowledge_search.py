@@ -2,10 +2,8 @@
 
 from langchain_core.tools import tool
 
-from app.services.rag import (
-    format_context,
-    get_rag_pipeline,
-)
+from app.core.kit import get_rag_pipeline
+from app.services.rag import format_context
 
 
 @tool(response_format="content_and_artifact")

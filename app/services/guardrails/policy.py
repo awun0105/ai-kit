@@ -20,8 +20,8 @@ from typing import (
 from urllib.parse import urlparse
 
 from pydantic import BaseModel
+import structlog
 
-from app.core.logging import logger
 from app.core.metrics import guardrail_events_total
 from app.services.guardrails.detectors import (
     PII_KINDS,
@@ -61,6 +61,8 @@ _APPROVALS = frozenset(
         "xác nhận",
     }
 )
+
+logger = structlog.get_logger()
 _POLITE_TAIL = re.compile(r"(?:\s+(?:nhé|nha|ạ|luôn|đi|please))+$")
 
 

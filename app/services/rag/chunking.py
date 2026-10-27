@@ -11,12 +11,14 @@ from pathlib import Path
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from markitdown import MarkItDown
+import structlog
 
-from app.core.logging import logger
 from app.services.rag.contracts import (
     Chunk,
     Document,
 )
+
+logger = structlog.get_logger()
 
 SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
 TEXT_SUFFIXES = {".md", ".txt"}

@@ -9,6 +9,7 @@ from langchain_core.messages import (
 )
 from pydantic import BaseModel
 
+from app.core.kit import set_rag_pipeline
 from app.services.agents import ResilientChatModel
 from tests.fakes import ScriptedModel
 from app.services.llm import (
@@ -20,7 +21,6 @@ from app.services.rag import (
     HashingEmbedder,
     InMemoryVectorStore,
     RAGPipeline,
-    set_rag_pipeline,
 )
 from app.services.rag.citations import (
     check_answer,

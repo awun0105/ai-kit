@@ -27,7 +27,6 @@ from typing import (
     Optional,
     Protocol,
 )
-from urllib.parse import quote_plus
 
 from psycopg import (
     AsyncConnection,
@@ -39,11 +38,9 @@ from psycopg.rows import (
 )
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
+import structlog
 
-from app.core.config import settings
-from app.core.logging import logger
-from app.core.prompts import _SYSTEM_PROMPT_TEMPLATE
-from app.services.rag import get_rag_pipeline
+logger = structlog.get_logger()
 
 # Questions about the asker's own account/order/data are never cached or served from cache.
 DEFAULT_PERSONAL_PATTERN = (
@@ -367,57 +364,3 @@ class AnswerCache:
 def scope_key(*parts: str) -> str:
     """Stable scope id from the things that change what a correct answer looks like."""
     return hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()[:16]
-
-
-_answer_cache: Optional[AnswerCache] = None
-_answer_cache_built = False
-
-
-def build_answer_cache_from_settings() -> Optional[AnswerCache]:
-    """Return the configured answer cache, or None when disabled or RAG is off."""
-    if not (settings.ANSWER_CACHE_ENABLED and settings.RAG_ENABLED):
-        return None
-    embedder = get_rag_pipeline().embedder
-    store = (
-        InMemoryAnswerStore(similarity_threshold=settings.ANSWER_CACHE_THRESHOLD)
-        if settings.ANSWER_CACHE_STORE == "memory"
-        else PgVectorAnswerStore(
-            f"postgresql://{quote_plus(settings.POSTGRES_USER)}:{quote_plus(settings.POSTGRES_PASSWORD)}"
-            f"@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}",
-            table=settings.ANSWER_CACHE_TABLE,
-            dimension=settings.RAG_EMBEDDING_DIM,
-            similarity_threshold=settings.ANSWER_CACHE_THRESHOLD,
-        )
-    )
-    return AnswerCache(
-        store=store,
-        embed=embedder.embed_query,
-        # A new prompt, model, knowledge table or cache version never serves old answers.
-        scope=scope_key(
-            _SYSTEM_PROMPT_TEMPLATE,
-            settings.DEFAULT_LLM_MODEL,
-            settings.RAG_TABLE,
-            settings.RAG_EMBEDDING_MODEL,
-            settings.ANSWER_CACHE_VERSION,
-        ),
-        # Safe because the graph answers cache-eligible turns from a neutral prompt (no name, no memory).
-        shared=True,
-        similarity_threshold=settings.ANSWER_CACHE_THRESHOLD,
-        ttl_s=settings.ANSWER_CACHE_TTL_S,
-        max_stale_s=settings.ANSWER_CACHE_MAX_STALE_S,
-    )
-
-
-def get_answer_cache() -> Optional[AnswerCache]:
-    """Return the process-wide answer cache (None when disabled), building it on first use."""
-    global _answer_cache, _answer_cache_built
-    if not _answer_cache_built:
-        _answer_cache = build_answer_cache_from_settings()
-        _answer_cache_built = True
-    return _answer_cache
-
-
-def set_answer_cache(cache: Optional[AnswerCache]) -> None:
-    """Replace the process-wide answer cache (used by tests)."""
-    global _answer_cache, _answer_cache_built
-    _answer_cache, _answer_cache_built = cache, True

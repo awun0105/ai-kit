@@ -17,9 +17,11 @@ from langchain_core.tools import (
     BaseTool,
     StructuredTool,
 )
+import structlog
 
-from app.core.logging import logger
 from app.services.guardrails.policy import Guardrails
+
+logger = structlog.get_logger()
 
 
 def _text(result: Any) -> str:

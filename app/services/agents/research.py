@@ -23,11 +23,11 @@ from langchain_core.tools import (
     tool,
 )
 from pydantic import BaseModel
+import structlog
 
-from app.core.logging import logger
-from app.services.agents.resilient_model import ResilientChatModel
-from app.services.llm import llm_service
 from app.services.rag.citations import check_report
+
+logger = structlog.get_logger()
 
 REPORT_PATH = "/report.md"
 
@@ -134,12 +134,17 @@ async def run_research(agent: Any, topic: str, config: Optional[dict] = None) ->
 
 
 def build_deep_research_tool(
-    research_tools: Sequence[BaseTool], max_model_calls: int = 40, max_tool_calls: int = 80
+    model: BaseChatModel, research_tools: Sequence[BaseTool], max_model_calls: int = 40, max_tool_calls: int = 80
 ) -> BaseTool:
-    """A tool that lets the chat agent hand a topic to the research team."""
-    agent = build_research_agent(
-        ResilientChatModel(service=llm_service), research_tools, max_model_calls, max_tool_calls
-    )
+    """A tool that lets the chat agent hand a topic to the research team.
+
+    Args:
+        model: Chat model for the team, e.g. ``ResilientChatModel(service=llm_service)``.
+        research_tools: Tools the researchers may use; wrap them with ``guard_tools`` first.
+        max_model_calls: Cap on model calls per run.
+        max_tool_calls: Cap on tool calls per run.
+    """
+    agent = build_research_agent(model, research_tools, max_model_calls, max_tool_calls)
 
     @tool
     async def deep_research(topic: str) -> str:

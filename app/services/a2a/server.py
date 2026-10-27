@@ -54,9 +54,11 @@ from starlette.types import (
     Scope,
     Send,
 )
+import structlog
 
-from app.core.logging import logger
 from app.schemas import Message
+
+logger = structlog.get_logger()
 
 AskAgent = Callable[[str, str, str], Awaitable[tuple[str, bool]]]
 """(caller, context_id, text) -> (reply, waiting_for_human)."""

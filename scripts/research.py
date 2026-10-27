@@ -8,12 +8,10 @@ import argparse
 import asyncio
 import sys
 
+from app.core.kit import get_guardrails
 from app.core.langgraph.tools import tools as builtin_tools
 from app.services.agents import ResilientChatModel
-from app.services.guardrails import (
-    get_guardrails,
-    guard_tools,
-)
+from app.services.guardrails import guard_tools
 from app.services.agents.research import (
     build_research_agent,
     run_research,

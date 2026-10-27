@@ -7,6 +7,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.core.kit import set_rag_pipeline
 from app.core.langgraph.graph import LangGraphAgent
 from app.core.langgraph.tools.knowledge_search import knowledge_search
 from app.services.evaluation import (
@@ -26,7 +27,6 @@ from app.services.rag import (
     HashingEmbedder,
     InMemoryVectorStore,
     RAGPipeline,
-    set_rag_pipeline,
 )
 from app.services.rag.chunking import load_documents
 from tests.fakes import ScriptedModel

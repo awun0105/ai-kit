@@ -16,8 +16,9 @@ from pydantic import (
     BaseModel,
     Field,
 )
+import structlog
 
-from app.core.logging import logger
+logger = structlog.get_logger()
 
 
 class PolicyVerdict(BaseModel):

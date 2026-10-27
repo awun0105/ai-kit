@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage  # noqa: E402
 from langchain_core.tools import tool  # noqa: E402
 from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 
+from app.core.kit import set_guardrails  # noqa: E402
 from app.core.langgraph.graph import LangGraphAgent  # noqa: E402
 from app.services.a2a.client import (  # noqa: E402
     ask_remote_agent_raw,
@@ -21,10 +22,7 @@ from app.services.a2a.server import (  # noqa: E402
     build_agent_card,
     parse_caller_tokens,
 )
-from app.services.guardrails import (  # noqa: E402
-    Guardrails,
-    set_guardrails,
-)
+from app.services.guardrails import Guardrails  # noqa: E402
 from app.services.memory import memory_service  # noqa: E402
 
 BASE = "http://a2a.test"

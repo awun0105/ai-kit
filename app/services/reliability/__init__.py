@@ -5,10 +5,7 @@ from app.services.reliability.answer_cache import (
     CacheHit,
     InMemoryAnswerStore,
     PgVectorAnswerStore,
-    build_answer_cache_from_settings,
-    get_answer_cache,
     scope_key,
-    set_answer_cache,
 )
 from app.services.reliability.breaker import (
     BreakerState,
@@ -39,10 +36,7 @@ __all__ = [
     "CacheHit",
     "InMemoryAnswerStore",
     "PgVectorAnswerStore",
-    "build_answer_cache_from_settings",
-    "get_answer_cache",
     "scope_key",
-    "set_answer_cache",
     "BreakerState",
     "ErrorKind",
     "FullJitterBackoff",

@@ -15,12 +15,13 @@ from langchain_core.messages import (
 from langgraph.checkpoint.memory import InMemorySaver
 from starlette.testclient import TestClient
 
+from app.core.kit import (
+    set_guardrails,
+    set_rag_pipeline,
+)
 from app.core.langgraph.graph import LangGraphAgent
 from app.mcp_server import build_server
-from app.services.guardrails import (
-    Guardrails,
-    set_guardrails,
-)
+from app.services.guardrails import Guardrails
 from app.services.mcp import (
     MCPToolkit,
     load_mcp_config,
@@ -30,7 +31,6 @@ from app.services.rag import (
     HashingEmbedder,
     InMemoryVectorStore,
     RAGPipeline,
-    set_rag_pipeline,
 )
 
 deleted: list[str] = []

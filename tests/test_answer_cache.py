@@ -9,6 +9,10 @@ from langchain_core.messages import (
 )
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.core.kit import (
+    set_answer_cache,
+    set_rag_pipeline,
+)
 from app.core.langgraph.graph import LangGraphAgent
 from app.schemas import Message
 from app.services.memory import memory_service
@@ -17,14 +21,12 @@ from app.services.rag import (
     HashingEmbedder,
     InMemoryVectorStore,
     RAGPipeline,
-    set_rag_pipeline,
 )
 from app.services.reliability import (
     AllProvidersFailedError,
     AnswerCache,
     InMemoryAnswerStore,
     PgVectorAnswerStore,
-    set_answer_cache,
 )
 
 EMBEDDER = HashingEmbedder(128)

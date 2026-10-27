@@ -15,8 +15,8 @@ from typing import (
     Sequence,
     TypeVar,
 )
+import structlog
 
-from app.core.logging import logger
 from app.core.metrics import (
     llm_attempts_total,
     llm_breaker_state,
@@ -37,6 +37,8 @@ from app.services.reliability.retry import (
     FullJitterBackoff,
     RetryBudget,
 )
+
+logger = structlog.get_logger()
 
 T = TypeVar("T")
 

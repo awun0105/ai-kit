@@ -15,8 +15,8 @@ import asyncio
 import time
 
 from pydantic import BaseModel
+import structlog
 
-from app.core.logging import logger
 from app.services.rag.chunking import chunk_documents
 from app.services.rag.contracts import (
     Chunk,
@@ -33,6 +33,8 @@ from app.services.rag.ranking import (
     tokenize,
 )
 from app.services.rag.store import VectorStore
+
+logger = structlog.get_logger()
 
 INSUFFICIENT_EVIDENCE = "The available sources do not contain enough information to answer this."
 
