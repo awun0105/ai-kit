@@ -1,6 +1,6 @@
 # Harness cho agent trong app (in-app agent harness)
 
-Ngày: 2026-10-27. Trạng thái: bản nháp, chờ duyệt.
+Ngày: 2026-10-27. Trạng thái: bản nháp, chờ duyệt; còn 3 câu hỏi cho người dùng (mục 13).
 
 ## 1. Mục đích
 
@@ -227,8 +227,31 @@ Một trang doc nói rõ:
 - App mẫu là app ghi chú hoặc danh sách việc viết bằng Python.
 - Harness core không phụ thuộc LangChain.
 
+**Quyết định thêm sau vòng đọc của reviewer (người viết quyết, cần người dùng xem lại):**
+
+- **API app gọi harness** đi trên cùng kết nối JSON-RPC hai chiều với adapter: `task.start(goal,
+  scope)`, `task.cancel`, `permission.reply(id, choice)`, `candidate.accept`, `candidate.reject`,
+  `revision.undo`; harness gửi sự kiện `task.*`, `permission.*`, `message.*` cho app.
+- **Driver cho agent của kit** nằm ngoài `app/services/` (như `app/acp_agent.py`), vì nó dùng
+  graph của app; harness core trong `app/services/harness/` không import graph. Sidecar dùng
+  cấu hình offline (SQLite) nên không cần Postgres.
+- **Hoàn tác** chỉ áp dụng cho revision mới nhất; **chấp nhận một phần** để đợt sau.
+- **Redaction**: harness core gọi thẳng bộ detector regex của guardrails, không qua package
+  `guardrails/__init__.py` (nơi kéo LangChain vào).
+
+**Đã có từ đợt trước:** ACP adapter cho agent của kit (`app/services/acp/`, `python -m
+app.acp_agent`) và bộ offline (`docs/offline.md`).
+
 ## 12. Để builder quyết định
 
 - Tên method cuối cùng, stdio hay socket cục bộ cho adapter, định dạng chi tiết của diff và transcript.
 - Cấu trúc thư mục bên trong `app/services/harness/`.
 - Thứ tự commit, miễn mỗi bước có test.
+
+## 13. Câu hỏi còn mở (người dùng quyết)
+
+1. Với agent bên ngoài (Claude Code, Codex) vốn tự sửa file và chạy shell: chạy agent trong một
+   thư mục bản nháp riêng như fframes, hay chỉ đảm bảo draft cho các thao tác đi qua harness?
+2. Thao tác `dangerous` (gửi đi, xóa tài nguyên bên ngoài, xuất file): chờ tới lúc commit mới
+   chạy, hay chạy ngay sau khi người dùng duyệt?
+3. Bộ test kiểm tra dùng để chứng nhận adapter của app, bản port của harness, hay cả hai?
