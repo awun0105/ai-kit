@@ -9,6 +9,9 @@ Full run: the real agent graph answers every question, a separate judge model
 
 Evaluate the knowledge base the app already serves instead of a fresh copy of the sample corpus:
     APP_ENV=development uv run python -m scripts.eval_rag --dataset my_golden.jsonl --use-knowledge-base
+
+Run every question 3 times and gate on how often, and how consistently, the agent gets it right:
+    APP_ENV=development uv run python -m scripts.eval_rag --runs 3 --min-pass-rate 0.8 --min-pass-all-runs 0.7
 """
 
 import argparse
@@ -62,7 +65,16 @@ def _args() -> argparse.Namespace:
     p.add_argument("--min-correctness", type=float, default=3.5)
     p.add_argument("--min-refusal", type=float, default=0.66)
     p.add_argument("--max-bad-citations", type=float, default=0.1)
-    p.add_argument("--max-error-rate", type=float, default=0.0, help="Share of items whose run or grading failed")
+    p.add_argument("--max-error-rate", type=float, default=0.0, help="Share of runs whose agent or judge failed")
+    p.add_argument("--runs", type=int, default=1, help="Times the agent answers each question")
+    p.add_argument("--pass-score", type=int, default=4, help="Judge score a run needs to pass")
+    p.add_argument("--min-trajectory", type=float, default=0.9, help="Share of runs that called the expected tools")
+    p.add_argument("--min-pass-rate", type=float, default=0.0, help="Share of runs that passed (0 = no gate)")
+    p.add_argument(
+        "--min-pass-all-runs", type=float, default=0.0, help="Share of items passed every run (0 = no gate)"
+    )
+    p.add_argument("--max-mean-tokens", type=float, default=0.0, help="Tokens per answer (0 = no gate)")
+    p.add_argument("--max-mean-tool-calls", type=float, default=0.0, help="Tool calls per answer (0 = no gate)")
     return p.parse_args()
 
 
@@ -93,7 +105,7 @@ async def _pipeline(args: argparse.Namespace) -> RAGPipeline:
 async def main() -> int:
     """Run the evaluation, write JSON and Markdown reports, and return the exit code."""
     args = _args()
-    items = load_golden(args.dataset)
+    items = load_golden(args.dataset, retrieval_tool=knowledge_search.name)
     pipeline = await _pipeline(args)
     results = await evaluate_retrieval(pipeline, items, args.k)
     thresholds = {
@@ -114,19 +126,30 @@ async def main() -> int:
             base_url=settings.EVALUATION_BASE_URL,
             api_key=settings.EVALUATION_API_KEY,
         )
-        await evaluate_answers(graph, items, AnswerJudge(judge_model), results)
+        await evaluate_answers(
+            graph, items, AnswerJudge(judge_model), results, runs=args.runs, pass_score=args.pass_score
+        )
         thresholds |= {
             "answers.faithfulness": args.min_faithfulness,
             "answers.correctness": args.min_correctness,
             "answers.refusal_accuracy": args.min_refusal,
             "answers.bad_citation_rate": args.max_bad_citations,
             "answers.error_rate": args.max_error_rate,
+            "answers.trajectory": args.min_trajectory,
         }
+        optional = {
+            "answers.pass_rate": args.min_pass_rate,
+            "answers.pass_all_runs": args.min_pass_all_runs,
+            "answers.mean_tokens": args.max_mean_tokens,
+            "answers.mean_tool_calls": args.max_mean_tool_calls,
+        }
+        thresholds |= {metric: value for metric, value in optional.items() if value > 0}
 
     config = {
         "k": args.k,
         "embedding": "knowledge-base" if args.use_knowledge_base else args.embedding,
         "retrieval_only": args.retrieval_only,
+        "runs": 0 if args.retrieval_only else args.runs,
         "judge": None if args.retrieval_only else settings.EVALUATION_LLM,
     }
     report = build_report(str(args.dataset), config, items, results, thresholds)

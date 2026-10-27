@@ -18,6 +18,9 @@ make eval-rag
 
 # your own golden set against the knowledge base the app already serves
 APP_ENV=development uv run python -m scripts.eval_rag --dataset my_golden.jsonl --use-knowledge-base
+
+# every question 3 times: gate on how often and how consistently the agent gets it right
+APP_ENV=development uv run python -m scripts.eval_rag --runs 3 --min-pass-rate 0.8 --min-pass-all-runs 0.7
 ```
 
 Each run writes `reports/eval-<timestamp>.json` (every item, every score) and a Markdown
@@ -30,12 +33,18 @@ JSONL or a JSON list of items, or the D14 lab format (`{"qa_pairs": [...]}`):
 ```json
 {"id": "W1", "question": "What is the warranty for the NovaBook 14?",
  "expected_answer": "24 months, limited hardware warranty.",
- "expected_sources": ["06_warranty_policy.md"], "difficulty": "easy", "should_refuse": false}
+ "expected_sources": ["06_warranty_policy.md"], "difficulty": "easy", "should_refuse": false,
+ "expected_tools": ["knowledge_search"], "tool_match": "in_order"}
 ```
 
 `expected_sources` are document ids, i.e. file paths relative to the ingested folder.
 `should_refuse` marks adversarial or out-of-scope questions whose correct answer is to decline
-or correct the premise. The sample set (`evals/datasets/orbittech/`, 20 questions over 10
+or correct the premise. `expected_tools` lists the tool names the agent should call (empty: not
+checked) and `tool_match` says how: `exact` (those calls, in that order, nothing else),
+`in_order` (those calls in that order, others allowed in between; the default) or `any_order`.
+Arguments are not compared: the agent's search query differs from run to run. D14 sets carry no
+tool expectations; `scripts/eval_rag.py` makes every non-adversarial D14 item expect
+`knowledge_search`. The sample set (`evals/datasets/orbittech/`, 20 questions over 10
 documents: easy, medium, hard, adversarial) is the default.
 
 ### Metrics and default gates
@@ -51,8 +60,20 @@ documents: easy, medium, hard, adversarial) is the default.
 | `answers.citation_support` | judge, 1–5: `[n]` labels point at supporting passages | reported |
 | `answers.refusal_accuracy` | adversarial items the agent declined or corrected | ≥ 0.66 |
 | `answers.bad_citation_rate` | answers citing a source number that was never retrieved | ≤ 0.10 |
-| `answers.error_rate` | items whose agent run or grading failed; they also count in `n`, so a half-broken agent cannot pass on the half that worked | ≤ 0.0 (`--max-error-rate`) |
+| `answers.error_rate` | runs whose agent or grading failed; they also count in `n`, so a half-broken agent cannot pass on the half that worked | ≤ 0.0 (`--max-error-rate`) |
+| `answers.trajectory` | runs that called the item's `expected_tools` | ≥ 0.90 (`--min-trajectory`) |
+| `answers.pass_rate` | runs that passed: no error, expected tools, valid citations, a refusal when due, faithfulness and correctness ≥ `--pass-score` (4) | `--min-pass-rate`, off by default |
+| `answers.pass_all_runs` | items that passed on **every** run (with `--runs` > 1) | `--min-pass-all-runs`, off by default |
+| `answers.mean_tokens` | input + output tokens per answer, every model call included (rail, sub-agents) | `--max-mean-tokens`, off by default |
+| `answers.mean_tool_calls`, `answers.mean_steps` | tool calls and model replies per answer | `--max-mean-tool-calls`, off by default |
 | `answers.p95_latency_s` | per-question latency | reported |
+
+With `--runs N` the agent answers every question N times on fresh threads and every run counts
+once in the answer metrics (`n` is the number of runs). An agent does not answer the same way
+twice; one sample can pass or fail by luck. `pass_rate` says how often it gets an item right,
+`pass_all_runs` how many items it gets right every time: a gap between them means unstable items,
+listed under "Items to look at" as `2/3 runs failed: ...`. A run of N costs N times the model
+and judge calls.
 
 Every metric is also broken down by `difficulty`. Override gates with `--min-hit`,
 `--min-faithfulness`, ... Offline (hashing embedder, so BM25 carries retrieval) the sample set
@@ -166,7 +187,8 @@ EVALUATION_API_KEY=...   # defaults to OPENAI_API_KEY if not set
 | `app/services/evaluation/dataset.py` | `GoldenItem`, `load_golden` (kit format, JSONL, D14 format) |
 | `app/services/evaluation/retrieval.py` | hit, recall, MRR, nDCG; per-group aggregation |
 | `app/services/evaluation/judge.py` | `AnswerJudge` (rubric grades, pairwise with swap), `cohen_kappa` |
-| `app/services/evaluation/runner.py` | Run retrieval and the agent graph, build the report, apply gates, Markdown |
+| `app/services/evaluation/trajectory.py` | `match_trajectory`: expected tool calls, `exact` / `in_order` / `any_order` |
+| `app/services/evaluation/runner.py` | Run retrieval and the agent graph (N runs per item), build the report, apply gates, Markdown |
 | `scripts/eval_rag.py` | CLI |
 | `tests/test_evaluation.py` | Metric maths and the offline retrieval regression gate |
 
@@ -179,7 +201,8 @@ EVALUATION_API_KEY=...   # defaults to OPENAI_API_KEY if not set
 ## Copy this module
 
 Copy `app/services/evaluation/` with `tests/test_evaluation.py` and `scripts/eval_rag.py`.
-It imports the RAG package for retrieval runs and nothing from the app.
+It imports the RAG package for retrieval runs and `TurnUsage` from `app/services/cost_guard.py`
+(copy it too) for token counts, and nothing from the app.
 
 ## Provenance
 
@@ -188,3 +211,4 @@ It imports the RAG package for retrieval runs and nothing from the app.
 | Sample corpus and golden set; answer-side and retrieval-side metrics; judge bias controls; failure analysis | Author's solution to the AI20K D14 AI-Evaluation lab (`K4-L3B-...-AIEvaluation`, branch `solution`: `template.py`, `golden_dataset.json`, `data/technology_store/`) |
 | Judge reliability (swap consistency, Cohen's kappa against human labels) | AI20K D24 Eval-Guard lab, phase B |
 | Base trace evaluator | `evals/` from the base template |
+| Tool trajectory match modes (`exact`, `in_order`, `any_order`); repeated runs with pass rate; tool-call, step and token metrics | Ideas from Google ADK (google/adk-python, commit `2084efb`): `src/google/adk/evaluation/trajectory_evaluator.py`, `_multi_run_aggregation_methods.py`, `_efficiency_evaluators.py`. Rewritten for LangChain messages, no code copied |

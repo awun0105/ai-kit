@@ -22,7 +22,11 @@ from app.services.evaluation import (
     score_retrieval,
     to_markdown,
 )
-from app.services.evaluation.runner import ItemResult
+from app.services.evaluation.runner import (
+    AnswerRun,
+    ItemResult,
+)
+from app.services.evaluation.trajectory import match_trajectory
 from app.services.rag import (
     HashingEmbedder,
     InMemoryVectorStore,
@@ -52,6 +56,31 @@ def test_load_d14_golden_set():
     first = next(i for i in items if i.id == "E01")
     assert first.expected_sources == ["06_warranty_policy.md"]
     assert sum(i.should_refuse for i in items) == 3
+
+
+def test_d14_items_expect_the_retrieval_tool_when_asked():
+    items = {i.id: i for i in load_golden(SAMPLE / "golden.json", retrieval_tool="knowledge_search")}
+
+    assert items["E01"].expected_tools == ["knowledge_search"]
+    assert items["A01"].expected_tools == []  # adversarial: declining without a search is fine
+    assert load_golden(SAMPLE / "golden.json")[0].expected_tools == []
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected", "mode", "matches"),
+    [
+        (["search", "lookup"], ["search", "lookup"], "exact", True),
+        (["search", "search", "lookup"], ["search", "lookup"], "exact", False),
+        (["search", "calc", "lookup"], ["search", "lookup"], "in_order", True),
+        (["lookup", "search"], ["search", "lookup"], "in_order", False),
+        (["lookup", "search"], ["search", "lookup"], "any_order", True),
+        (["search"], ["search", "search"], "any_order", False),
+        ([], [], "exact", True),
+        (["search"], [], "in_order", True),
+    ],
+)
+def test_match_trajectory(actual, expected, mode, matches):
+    assert match_trajectory(actual, expected, mode) is matches
 
 
 def test_load_jsonl(tmp_path):
@@ -100,6 +129,7 @@ async def test_answers_are_run_through_the_real_graph_and_judged(monkeypatch):
             question="What is the warranty for the NovaBook 14?",
             expected_answer="24 months",
             difficulty="easy",
+            expected_tools=["knowledge_search"],
         ),
         GoldenItem(
             id="adv",
@@ -133,8 +163,14 @@ async def test_answers_are_run_through_the_real_graph_and_judged(monkeypatch):
         set_rag_pipeline(None)
     report = build_report("t", {}, items, results, {"answers.faithfulness": 4.0, "answers.refusal_accuracy": 1.0})
 
-    assert results["w"].answer == "The NovaBook 14 has a 24-month warranty [1]."
-    assert results["adv"].refusal_correct is False
+    assert results["w"].runs[0].answer == "The NovaBook 14 has a 24-month warranty [1]."
+    assert results["w"].runs[0].tools_called == ["knowledge_search"]
+    assert results["w"].runs[0].trajectory_match is True
+    assert results["w"].runs[0].steps == 2
+    assert results["adv"].runs[0].refusal_correct is False
+    assert report.answers["all"]["trajectory"] == 1.0
+    assert report.answers["all"]["mean_tool_calls"] == 0.5
+    assert report.answers["all"]["pass_rate"] == 0.5  # the adversarial item should have declined
     assert report.answers["all"]["correctness"] == 3.5
     assert report.answers["all"]["bad_citation_rate"] == 0.0  # [9] in an answer without retrieval is not checked
     assert [g.passed for g in report.gates] == [True, False]
@@ -146,8 +182,15 @@ def test_failed_items_count_against_the_answer_gates():
     items = [GoldenItem(id="ok", question="q1"), GoldenItem(id="boom", question="q2")]
     grade = AnswerGrade(faithfulness=5, correctness=5, citation_support=5, declined=False, rationale="ok")
     results = {
-        "ok": ItemResult(id="ok", difficulty="unspecified", question="q1", answer="fine", grade=grade),
-        "boom": ItemResult(id="boom", difficulty="unspecified", question="q2", error="RuntimeError: provider down"),
+        "ok": ItemResult(
+            id="ok", difficulty="unspecified", question="q1", runs=[AnswerRun(answer="fine", grade=grade, passed=True)]
+        ),
+        "boom": ItemResult(
+            id="boom",
+            difficulty="unspecified",
+            question="q2",
+            runs=[AnswerRun(error="RuntimeError: provider down", passed=False)],
+        ),
     }
 
     report = build_report("t", {}, items, results, {"answers.faithfulness": 4.0, "answers.error_rate": 0.0})
@@ -168,3 +211,49 @@ async def test_pairwise_judge_reports_position_bias():
     item = GoldenItem(id="1", question="q", expected_answer="r")
 
     assert await judge.compare(item, "answer one", "answer two") == "inconsistent"
+
+
+async def test_repeated_runs_report_how_often_an_item_passes(monkeypatch):
+    # The agent searches on two of three runs and answers from memory on the other.
+    items = [GoldenItem(id="w", question="Warranty?", expected_tools=["knowledge_search"])]
+    search = AIMessage(content="", tool_calls=[{"name": "knowledge_search", "args": {"query": "warranty"}, "id": "k"}])
+    replies = [search, AIMessage(content="24 months."), AIMessage(content="I think 12 months."), search]
+    replies.append(AIMessage(content="24 months."))
+
+    async def scripted(messages, *args, **kwargs):
+        return replies.pop(0)
+
+    set_rag_pipeline(RAGPipeline(HashingEmbedder(64), InMemoryVectorStore()))
+    agent = LangGraphAgent()
+    agent.tools_by_name = {"knowledge_search": knowledge_search}
+    monkeypatch.setattr(agent.llm_service, "call", scripted)
+    graph = await agent.create_graph(checkpointer=InMemorySaver())
+    results: dict[str, ItemResult] = {}
+    try:
+        await evaluate_answers(graph, items, None, results, runs=3)
+    finally:
+        set_rag_pipeline(None)
+    report = build_report("t", {}, items, results, {"answers.pass_rate": 0.9, "answers.pass_all_runs": 1.0})
+
+    assert [run.trajectory_match for run in results["w"].runs] == [True, False, True]
+    assert report.answers["all"]["n"] == 3
+    assert report.answers["all"]["pass_rate"] == pytest.approx(0.667)
+    assert report.answers["all"]["pass_all_runs"] == 0.0
+    assert not report.passed
+    assert "1/3 runs failed: tools called []" in to_markdown(report)
+
+
+def test_efficiency_gates_are_upper_limits():
+    items = [GoldenItem(id="a", question="q")]
+    run = AnswerRun(answer="x", tools_called=["s", "s", "s"], steps=4, tokens=9000, passed=True)
+    results = {"a": ItemResult(id="a", difficulty="unspecified", question="q", runs=[run])}
+
+    report = build_report(
+        "t", {}, items, results, {"answers.mean_tool_calls": 2, "answers.mean_tokens": 10000, "answers.mean_steps": 4}
+    )
+
+    assert [(g.metric, g.passed) for g in report.gates] == [
+        ("answers.mean_tool_calls", False),
+        ("answers.mean_tokens", True),
+        ("answers.mean_steps", True),
+    ]
