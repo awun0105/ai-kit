@@ -255,6 +255,14 @@ async def test_egress_allowlist_blocks_unknown_host(monkeypatch):
     assert result.startswith("Tool call not executed: blocked by policy")
 
 
+def test_secrets_in_tool_arguments_are_blocked_without_an_egress_allowlist():
+    # A web search query is egress too: a key in it leaves the app whatever the allowlist says.
+    decision = Guardrails().authorize_tool_call("duckduckgo_results_json", {"query": "sk-abcdefghijklmnopqrstuv"})
+
+    assert not decision.allowed
+    assert Guardrails().authorize_tool_call("duckduckgo_results_json", {"query": "chính sách nghỉ phép"}).allowed
+
+
 async def test_instructions_inside_tool_output_are_neutralized(monkeypatch):
     set_guardrails(Guardrails())
     call = AIMessage(content="", tool_calls=[{"name": "fetch_url", "args": {"url": "https://ok.example"}, "id": "f1"}])

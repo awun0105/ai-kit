@@ -62,7 +62,7 @@ side effect.
 | `GUARD_PII_ALLOWLIST` | – | Comma list of values or `@domain` suffixes never redacted (public support contacts) |
 | `GUARD_DENYLIST` | – | Comma list of application secrets that must never be shown (internal hosts, demo passwords) |
 | `GUARD_APPROVAL_TOOLS` | – | Comma list of tool names that need human approval |
-| `GUARD_EGRESS_ALLOWLIST` | – | When set, URLs in tool arguments must be https on these hosts or their subdomains |
+| `GUARD_EGRESS_ALLOWLIST` | – | When set, URLs in tool arguments must be https on these hosts or their subdomains. Secrets in tool arguments are blocked whether or not it is set |
 | `GUARD_SCREEN_TOOL_OUTPUT` | `true` | Neutralize instruction-like text in tool results |
 | `GUARD_LLM_RAIL_ENABLED` | `false` | Add the LLM policy rail |
 | `GUARD_LLM_RAIL_POLICY` | general assistant | What the assistant is for, e.g. "Answers employees' questions about HR policy." |

@@ -178,9 +178,10 @@ class Guardrails:
                 if parsed.scheme != "https" or not host_ok:
                     _record("tool", "blocked_egress")
                     return ToolDecision(allowed=False, reason=f"destination {host or url!r} is not allowlisted")
-            if self._sensitive(normalize_for_security(flat), SECRET_KINDS):
-                _record("tool", "blocked_secret")
-                return ToolDecision(allowed=False, reason="arguments contain protected data")
+        # Any tool argument can leave the app (a search query, an MCP call), allowlist or not.
+        if self._sensitive(normalize_for_security(flat), SECRET_KINDS):
+            _record("tool", "blocked_secret")
+            return ToolDecision(allowed=False, reason="arguments contain protected data")
 
         if name in self.approval_tools:
             return ToolDecision(allowed=True, needs_approval=True, reason=f"{name} requires human approval")
