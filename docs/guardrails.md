@@ -46,8 +46,9 @@ digit or symbol, so "mật khẩu mặc định là gì?" is left alone), and yo
 
 List tool names in `GUARD_APPROVAL_TOOLS`. When the model calls one, the graph pauses
 with an `interrupt` and the API returns the approval question as the assistant
-message. The user's next message resumes the graph: `yes`, `ok`, `đồng ý`, `có`,
-`duyệt`, ... approve; anything else cancels and the model is told the user declined.
+message. The user's next message resumes the graph. Only a reply that is entirely a yes
+approves (`yes`, `ok`, `đồng ý`, `có`, `duyệt nhé`, `Xác nhận.`, ...); anything else, including
+`có lẽ không` or `ok nhưng đừng`, cancels and the model is told the user declined.
 All approvals are collected before any tool runs, so a resumed turn never repeats a
 side effect.
 

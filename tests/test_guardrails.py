@@ -18,6 +18,7 @@ from app.services.guardrails import (
     Guardrails,
     LLMPolicyRail,
     find_injections,
+    is_affirmative,
     normalize_for_security,
     set_guardrails,
 )
@@ -261,6 +262,30 @@ def test_secrets_in_tool_arguments_are_blocked_without_an_egress_allowlist():
 
     assert not decision.allowed
     assert Guardrails().authorize_tool_call("duckduckgo_results_json", {"query": "chính sách nghỉ phép"}).allowed
+
+
+@pytest.mark.parametrize(
+    "reply, approved",
+    [
+        ("yes", True),
+        ("Yes!", True),
+        ("ok", True),
+        ("đồng ý", True),
+        ("có", True),
+        ("duyệt nhé", True),
+        ("Xác nhận.", True),
+        ("không", False),
+        ("có lẽ không", False),
+        ("có thể đừng chạy", False),
+        ("ok nhưng đừng", False),
+        ("yes, but don't send it", False),
+        ("no", False),
+        ("chưa", False),
+        ("", False),
+    ],
+)
+def test_only_a_clear_yes_approves_a_tool_call(reply, approved):
+    assert is_affirmative(reply) is approved
 
 
 async def test_instructions_inside_tool_output_are_neutralized(monkeypatch):

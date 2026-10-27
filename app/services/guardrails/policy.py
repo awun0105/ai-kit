@@ -11,6 +11,7 @@ Layers, in the order a request meets them (defence in depth, as in the D11 lab):
 """
 
 import re
+import unicodedata
 from typing import (
     Any,
     Literal,
@@ -38,9 +39,29 @@ PIIAction = Literal["block", "redact", "allow"]
 
 DEFAULT_REFUSAL = "Sorry, I can't help with that request."
 _URL = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
-_AFFIRMATIVE = re.compile(
-    r"^\s*(?:y|yes|ok|okay|approve|approved|confirm|sure|đồng\s*ý|có|ok\s*luôn|được|duyệt|xác\s*nhận)\b", re.I
+# The whole reply must be one of these (after punctuation and a polite tail are dropped):
+# matching a prefix approved "có lẽ không" and "ok nhưng đừng".
+_APPROVALS = frozenset(
+    {
+        "y",
+        "yes",
+        "yep",
+        "ok",
+        "okay",
+        "approve",
+        "approved",
+        "confirm",
+        "confirmed",
+        "sure",
+        "go ahead",
+        "đồng ý",
+        "có",
+        "được",
+        "duyệt",
+        "xác nhận",
+    }
 )
+_POLITE_TAIL = re.compile(r"(?:\s+(?:nhé|nha|ạ|luôn|đi|please))+$")
 
 
 class InputDecision(BaseModel):
@@ -69,8 +90,9 @@ class ToolDecision(BaseModel):
 
 
 def is_affirmative(answer: object) -> bool:
-    """Interpret a human reply to an approval question."""
-    return bool(_AFFIRMATIVE.match(str(answer)))
+    """Interpret a human reply to an approval question: only an unambiguous yes approves."""
+    text = re.sub(r"[^\w\s]", " ", unicodedata.normalize("NFC", str(answer)).lower())
+    return _POLITE_TAIL.sub("", " ".join(text.split())) in _APPROVALS
 
 
 def _record(rail: str, action: str) -> None:
