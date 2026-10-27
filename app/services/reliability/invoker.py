@@ -43,6 +43,21 @@ T = TypeVar("T")
 _STATE_VALUE = {BreakerState.CLOSED: 0, BreakerState.HALF_OPEN: 1, BreakerState.OPEN: 2}
 
 
+def check_timeout_budget(max_attempts: int, attempt_timeout_s: float, total_timeout_s: float) -> None:
+    """Refuse a policy whose total timeout runs out before the ladder reaches a fallback model.
+
+    A hung provider uses ``max_attempts * attempt_timeout_s`` (plus backoff) before the
+    invoker moves on; the total must leave at least one more attempt for the next rung,
+    otherwise the fallback ladder never runs when it is needed most.
+    """
+    needed = max(1, max_attempts) * attempt_timeout_s + attempt_timeout_s
+    if total_timeout_s < needed:
+        raise ValueError(
+            f"total timeout {total_timeout_s}s leaves no room for a fallback model: a hung provider takes "
+            f"{max(1, max_attempts)} x {attempt_timeout_s}s; set it to at least {needed}s or lower the attempts"
+        )
+
+
 class AllProvidersFailedError(RuntimeError):
     """Every rung of the ladder failed, was cooling down, or had an open breaker."""
 

@@ -70,7 +70,7 @@ flowchart TD
   count toward the model's breaker. This works for any provider whose exceptions carry an HTTP status.
 - **No global switching.** Every call starts from the preferred model again. A model that keeps
   failing has an open breaker, so skipping it costs nothing.
-- **Total timeout**: `LLM_TOTAL_TIMEOUT` (default 60 s) caps the whole ladder.
+- **Total timeout**: `LLM_TOTAL_TIMEOUT` (default 90 s) caps the whole ladder. Startup fails if it cannot fit `MAX_LLM_CALL_RETRIES` x `LLM_ATTEMPT_TIMEOUT` plus one attempt on a fallback model, because the ladder would then never fail over from a hung provider.
 
 Settings and the reasoning behind each rule: [reliability.md](reliability.md).
 

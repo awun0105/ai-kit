@@ -26,6 +26,7 @@ from app.services.reliability.errors import (
 from app.services.reliability.invoker import (
     AllProvidersFailedError,
     ResilientInvoker,
+    check_timeout_budget,
 )
 from app.services.reliability.retry import (
     FullJitterBackoff,
@@ -49,6 +50,7 @@ __all__ = [
     "ResilientInvoker",
     "RetryBudget",
     "SlidingWindowBreaker",
+    "check_timeout_budget",
     "classify",
     "counts_toward_breaker",
     "failover_helps",

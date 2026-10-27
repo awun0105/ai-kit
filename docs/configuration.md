@@ -31,8 +31,8 @@ cp .env.example .env.development
 | `DEFAULT_LLM_MODEL` | `gpt-5-mini` | No | Starting model — see [LLM Service](llm-service.md) for fallback order |
 | `DEFAULT_LLM_TEMPERATURE` | `0.2` | No | Temperature for chat completions |
 | `MAX_TOKENS` | `2000` | No | Max tokens per LLM response |
-| `MAX_LLM_CALL_RETRIES` | `3` | No | Retries per model before switching to fallback |
-| `LLM_TOTAL_TIMEOUT` | `60` | No | Max seconds for the entire fallback loop |
+| `MAX_LLM_CALL_RETRIES` | `2` | No | Attempts per model before switching to fallback |
+| `LLM_TOTAL_TIMEOUT` | `90` | No | Max seconds for the entire fallback loop; must fit retries x attempt timeout + one fallback attempt |
 | `SESSION_NAMING_ENABLED` | `true` | No | Auto-generate a session title from the user's first message using an LLM background task |
 
 ---

@@ -14,6 +14,7 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.core.config import settings
 from app.core.langgraph.graph import LangGraphAgent
 from app.services.llm import (
     LLMRegistry,
@@ -27,6 +28,7 @@ from app.services.reliability import (
     ResilientInvoker,
     RetryBudget,
     SlidingWindowBreaker,
+    check_timeout_budget,
     classify,
     retry_after_seconds,
 )
@@ -273,6 +275,25 @@ async def test_attempt_timeout_fails_over():
     slow, backup = Provider("a", delay=1.0), Provider("b")
 
     assert await inv.invoke(_ladder(slow, backup)) == "answer from b"
+
+
+def test_timeout_budget_must_leave_room_for_a_fallback_rung():
+    # 3 attempts x 30 s on a hung provider spend the whole 60 s budget: the backup is never tried.
+    with pytest.raises(ValueError, match="fallback"):
+        check_timeout_budget(max_attempts=3, attempt_timeout_s=30, total_timeout_s=60)
+    check_timeout_budget(max_attempts=2, attempt_timeout_s=25, total_timeout_s=90)
+
+
+def test_default_settings_leave_room_for_a_fallback_rung():
+    check_timeout_budget(settings.MAX_LLM_CALL_RETRIES, settings.LLM_ATTEMPT_TIMEOUT, settings.LLM_TOTAL_TIMEOUT)
+
+
+async def test_hung_primary_fails_over_within_the_total_budget():
+    # The default ratios scaled down 100x: 2 attempts x 0.25 s on the hung model, then the backup, inside 0.9 s.
+    inv = ResilientInvoker(max_attempts=2, attempt_timeout_s=0.25, backoff=FullJitterBackoff(0.001, 0.01))
+    hung, backup = Provider("a", delay=10), Provider("b")
+
+    assert await asyncio.wait_for(inv.invoke(_ladder(hung, backup)), timeout=0.9) == "answer from b"
 
 
 # ---------------------------------------------------------------- LLM service and registry

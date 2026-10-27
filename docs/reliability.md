@@ -81,9 +81,9 @@ Other metrics: `llm_attempts_total{model, outcome}`, `llm_breaker_state{model}`
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MAX_LLM_CALL_RETRIES` | `3` | Attempts per model, first try included |
-| `LLM_ATTEMPT_TIMEOUT` | `30` | Seconds per attempt (also the SDK timeout) |
-| `LLM_TOTAL_TIMEOUT` | `60` | Seconds for the whole call across the ladder |
+| `MAX_LLM_CALL_RETRIES` | `2` | Attempts per model, first try included |
+| `LLM_ATTEMPT_TIMEOUT` | `25` | Seconds per attempt (also the SDK timeout) |
+| `LLM_TOTAL_TIMEOUT` | `90` | Seconds for the whole call across the ladder; checked by `check_timeout_budget` at startup |
 | `LLM_RETRY_BASE_S` / `LLM_RETRY_CAP_S` | `0.5` / `8` | Full-jitter backoff |
 | `LLM_RETRY_BUDGET_RATIO` | `0.1` | Retries allowed per first attempt, on average |
 | `LLM_MAX_RETRY_AFTER_S` | `10` | Longer `retry-after` hints fail over instead of waiting |

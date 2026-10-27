@@ -161,10 +161,11 @@ class Settings:
         self.SESSION_NAMING_ENABLED = os.getenv("SESSION_NAMING_ENABLED", "true").lower() == "true"
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
         self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
-        self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "3"))
-        self.LLM_TOTAL_TIMEOUT = int(os.getenv("LLM_TOTAL_TIMEOUT", "60"))
+        self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "2"))
+        # Must fit MAX_LLM_CALL_RETRIES x LLM_ATTEMPT_TIMEOUT plus one fallback attempt (checked at startup).
+        self.LLM_TOTAL_TIMEOUT = float(os.getenv("LLM_TOTAL_TIMEOUT", "90"))
         # Reliability (see docs/reliability.md). MAX_LLM_CALL_RETRIES is the attempt count per model.
-        self.LLM_ATTEMPT_TIMEOUT = float(os.getenv("LLM_ATTEMPT_TIMEOUT", "30"))
+        self.LLM_ATTEMPT_TIMEOUT = float(os.getenv("LLM_ATTEMPT_TIMEOUT", "25"))
         self.LLM_RETRY_BASE_S = float(os.getenv("LLM_RETRY_BASE_S", "0.5"))
         self.LLM_RETRY_CAP_S = float(os.getenv("LLM_RETRY_CAP_S", "8"))
         self.LLM_RETRY_BUDGET_RATIO = float(os.getenv("LLM_RETRY_BUDGET_RATIO", "0.1"))

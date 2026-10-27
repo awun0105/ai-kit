@@ -37,6 +37,7 @@ from app.services.reliability import (
     ResilientInvoker,
     RetryBudget,
     SlidingWindowBreaker,
+    check_timeout_budget,
 )
 
 T = TypeVar("T", bound=BaseModel)
@@ -44,6 +45,7 @@ T = TypeVar("T", bound=BaseModel)
 
 def build_invoker_from_settings() -> ResilientInvoker:
     """Assemble the reliability policy from the LLM_* settings."""
+    check_timeout_budget(settings.MAX_LLM_CALL_RETRIES, settings.LLM_ATTEMPT_TIMEOUT, settings.LLM_TOTAL_TIMEOUT)
     return ResilientInvoker(
         max_attempts=settings.MAX_LLM_CALL_RETRIES,
         attempt_timeout_s=settings.LLM_ATTEMPT_TIMEOUT,
