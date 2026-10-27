@@ -58,7 +58,7 @@ See [getting started](docs/getting-started.md) for local development without Doc
 | `make test` | Run the test suite (offline; integration tests skip unless `RAG_TEST_PG_URL` is set) |
 | `make check` | ruff + pyright |
 | `make dev` | Run the API locally with reload |
-| `make ingest CORPUS=dir` | Ingest documents (re-runs skip unchanged chunks and invalidate stale cached answers) |
+| `make ingest CORPUS=dir` | Ingest documents (re-runs skip unchanged chunks, drop chunks a document no longer has, and invalidate stale cached answers; `--prune` via `scripts.ingest` also removes deleted documents) |
 | `make eval-rag-offline` | Retrieval regression check on the sample golden set (the CI gate) |
 | `make eval-rag` | Full golden-set evaluation with a judge model |
 | `python -m app.mcp_server` | Serve the knowledge base to other agents over MCP (stdio) |

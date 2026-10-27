@@ -7,7 +7,10 @@ memory, so RAG chunks live there too instead of adding a second database.
 
 import json
 import math
-from typing import Protocol
+from typing import (
+    Optional,
+    Protocol,
+)
 from urllib.parse import quote_plus
 
 from psycopg import (
@@ -43,6 +46,14 @@ class VectorStore(Protocol):
 
     async def all_chunks(self) -> list[Chunk]:
         """Return every stored chunk with its lexical tokens, used to build the BM25 index."""
+        ...
+
+    async def chunk_owners(self, document_ids: Optional[list[str]] = None) -> dict[str, str]:
+        """Map stored chunk ids to their document id, for ``document_ids`` or for every document."""
+        ...
+
+    async def delete(self, chunk_ids: list[str]) -> None:
+        """Remove chunks by id."""
         ...
 
 
@@ -81,6 +92,20 @@ class InMemoryVectorStore:
         """Return every stored chunk."""
         return [chunk for chunk, _ in self._rows.values()]
 
+    async def chunk_owners(self, document_ids: Optional[list[str]] = None) -> dict[str, str]:
+        """Map stored chunk ids to their document id."""
+        wanted = None if document_ids is None else set(document_ids)
+        return {
+            cid: chunk.document_id
+            for cid, (chunk, _) in self._rows.items()
+            if wanted is None or chunk.document_id in wanted
+        }
+
+    async def delete(self, chunk_ids: list[str]) -> None:
+        """Remove chunks by id."""
+        for cid in chunk_ids:
+            self._rows.pop(cid, None)
+
 
 def _vector_literal(vector: list[float]) -> str:
     return "[" + ",".join(repr(float(v)) for v in vector) + "]"
@@ -109,6 +134,7 @@ class PgVectorStore:
         self._conninfo = conninfo
         self._table = sql.Identifier(table)
         self._index = sql.Identifier(f"{table}_embedding_hnsw")
+        self._document_index = sql.Identifier(f"{table}_document_id")
         self._dimension = dimension
         self._pool_size = pool_size
         self._pool: AsyncConnectionPool[AsyncConnection[DictRow]] | None = None
@@ -149,6 +175,11 @@ class PgVectorStore:
                 await conn.execute(
                     sql.SQL("CREATE INDEX IF NOT EXISTS {i} ON {t} USING hnsw (embedding vector_cosine_ops)").format(
                         i=self._index, t=self._table
+                    )
+                )
+                await conn.execute(
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {i} ON {t} (document_id)").format(
+                        i=self._document_index, t=self._table
                     )
                 )
             self._pool = pool
@@ -223,3 +254,26 @@ class PgVectorStore:
         async with pool.connection() as conn:
             rows = await (await conn.execute(query)).fetchall()
         return [_row_to_chunk(r) for r in rows]
+
+    async def chunk_owners(self, document_ids: Optional[list[str]] = None) -> dict[str, str]:
+        """Map stored chunk ids to their document id."""
+        if document_ids is None:
+            query = sql.SQL("SELECT id, document_id FROM {t}").format(t=self._table)
+            params: tuple = ()
+        else:
+            if not document_ids:
+                return {}
+            query = sql.SQL("SELECT id, document_id FROM {t} WHERE document_id = ANY(%s)").format(t=self._table)
+            params = (document_ids,)
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            rows = await (await conn.execute(query, params)).fetchall()
+        return {r["id"]: r["document_id"] for r in rows}
+
+    async def delete(self, chunk_ids: list[str]) -> None:
+        """Remove chunks by id."""
+        if not chunk_ids:
+            return
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            await conn.execute(sql.SQL("DELETE FROM {t} WHERE id = ANY(%s)").format(t=self._table), (chunk_ids,))

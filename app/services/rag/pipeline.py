@@ -44,7 +44,9 @@ class IngestReport(BaseModel):
     chunks: int
     embedded: int
     reused: int
-    changed_documents: list[str] = []
+    removed_chunks: int = 0
+    changed_documents: list[str] = []  # new, edited, shortened or removed: invalidate answers built on them
+    removed_documents: list[str] = []
 
 
 class RAGPipeline:
@@ -96,8 +98,14 @@ class RAGPipeline:
         self._bm25_stale = True
         self._bm25_built_at = 0.0
 
-    async def ingest(self, documents: list[Document]) -> IngestReport:
-        """Chunk, embed and upsert documents. Unchanged chunks are not re-embedded."""
+    async def ingest(self, documents: list[Document], prune_missing: bool = False) -> IngestReport:
+        """Chunk, embed and upsert documents. Unchanged chunks are not re-embedded.
+
+        Chunks a re-ingested document no longer produces (it got shorter) are deleted.
+        With ``prune_missing`` the batch is the whole corpus: documents absent from it
+        are deleted too. Deletion runs after the upsert, so a failed embedding call
+        leaves the old chunks in place.
+        """
         chunks = chunk_documents(documents, self.chunk_size, self.chunk_overlap)
         stored = await self.store.existing_contents([c.id for c in chunks])
         pending = [c for c in chunks if stored.get(c.id) != c.content]
@@ -107,15 +115,23 @@ class RAGPipeline:
             vectors = await self.embedder.embed_documents([c.content for c in batch])
             await self.store.upsert(batch, vectors)
 
+        batch_documents = {d.id for d in documents}
+        owners = await self.store.chunk_owners(None if prune_missing else sorted(batch_documents))
+        current = {c.id for c in chunks}
+        stale = sorted(cid for cid in owners if cid not in current)
+        await self.store.delete(stale)
+
         self._bm25_stale = True  # corpus changed; rebuild lazily on next query, reusing cached tokens
         report = IngestReport(
             documents=len(documents),
             chunks=len(chunks),
             embedded=len(pending),
             reused=len(chunks) - len(pending),
-            changed_documents=sorted({c.document_id for c in pending}),
+            removed_chunks=len(stale),
+            changed_documents=sorted({c.document_id for c in pending} | {owners[cid] for cid in stale}),
+            removed_documents=sorted({owners[cid] for cid in stale} - batch_documents),
         )
-        logger.info("rag_ingest_completed", **report.model_dump(exclude={"changed_documents"}))
+        logger.info("rag_ingest_completed", **report.model_dump(exclude={"changed_documents", "removed_documents"}))
         return report
 
     def _with_lexical_tokens(self, chunks: list[Chunk]) -> list[Chunk]:

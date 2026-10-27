@@ -17,6 +17,10 @@ retrieve: query -> dense (cosine, pgvector) ─┐
 ```
 
 - **Stable chunk ids** (`<relative path>::chunk-<n>`) make re-ingestion an upsert.
+  Chunks a re-ingested document no longer produces (it got shorter) are deleted, and
+  `ingest(..., prune_missing=True)` (`scripts.ingest --prune`) also deletes documents that
+  are missing from the batch, for a full corpus sync. Both count as changed documents, so
+  cached answers built on them are invalidated.
   Chunks whose content did not change are not re-embedded or re-tokenized.
 - **Vietnamese word segmentation.** "học phí" is one token (`học_phí`), so a query for
   tuition does not match a chunk that only has "học" and "phí" in different places.
@@ -38,6 +42,8 @@ RAG_ENABLED=true
 
 # 2. ingest a folder (re-run any time; unchanged chunks are skipped)
 APP_ENV=development uv run python -m scripts.ingest path/to/corpus --query "a test question"
+# the folder is the whole corpus: also delete documents removed from it
+APP_ENV=development uv run python -m scripts.ingest path/to/corpus --prune
 ```
 
 | Variable | Default | Meaning |

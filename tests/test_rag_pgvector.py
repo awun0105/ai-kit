@@ -11,6 +11,7 @@ import uuid
 import pytest
 
 from app.services.rag import (
+    Document,
     HashingEmbedder,
     PgVectorStore,
     RAGPipeline,
@@ -41,3 +42,26 @@ async def test_pgvector_round_trip():
     assert all(c.lexical_tokens and c.lexical_mode == "auto" for c in chunks)
     assert result.results[0].chunk.document_id == "policy/warranty.md"
     assert 0.0 < result.best_dense_score <= 1.0
+
+
+async def test_pgvector_drops_stale_chunks_and_prunes_documents():
+    table = f"rag_test_{uuid.uuid4().hex[:8]}"
+    store = PgVectorStore(PG_URL, table=table, dimension=64)
+    pipeline = RAGPipeline(embedder=HashingEmbedder(64), store=store, chunk_size=60, chunk_overlap=0)
+    long_doc = Document(
+        id="faq.md", title="FAQ", source="faq.md", content=" ".join(f"Old fact {i} about returns." for i in range(12))
+    )
+    try:
+        await pipeline.ingest([long_doc, *DOCS])
+        shrunk = await pipeline.ingest([long_doc.model_copy(update={"content": "Returns are free."})])
+        pruned = await pipeline.ingest(DOCS[:2], prune_missing=True)
+        owners = await store.chunk_owners()
+    finally:
+        pool = await store._get_pool()
+        async with pool.connection() as conn:
+            await conn.execute(f"DROP TABLE IF EXISTS {table}")
+        await store.close()
+
+    assert shrunk.removed_chunks > 0 and shrunk.changed_documents == ["faq.md"]
+    assert pruned.removed_documents == ["faq.md", "news/launch.md"]
+    assert set(owners.values()) == {"policy/refund.md", "policy/warranty.md"}

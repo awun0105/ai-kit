@@ -131,6 +131,36 @@ async def test_reingest_skips_unchanged_chunks(pipeline):
     assert pipeline.embedder.embedded == 3
 
 
+async def test_reingest_drops_chunks_a_shorter_document_no_longer_has():
+    pipeline = RAGPipeline(embedder=HashingEmbedder(64), store=InMemoryVectorStore(), chunk_size=60, chunk_overlap=0)
+    long_doc = Document(
+        id="faq.md", title="FAQ", source="faq.md", content=" ".join(f"Old fact {i} about returns." for i in range(12))
+    )
+    await pipeline.ingest([long_doc])
+
+    report = await pipeline.ingest([long_doc.model_copy(update={"content": "Returns are free."})])
+    chunks = await pipeline.store.all_chunks()
+    result = await pipeline.retrieve("old fact 7")
+
+    assert [c.id for c in chunks] == ["faq.md::chunk-0"]
+    assert report.removed_chunks > 0 and report.changed_documents == ["faq.md"]
+    assert all("Old fact" not in r.chunk.content for r in result.results)
+
+
+async def test_prune_removes_documents_missing_from_the_corpus(pipeline):
+    await pipeline.ingest(DOCS)
+
+    partial = await pipeline.ingest(DOCS[:2])  # a partial batch never deletes other documents
+    assert len(await pipeline.store.all_chunks()) == 3 and partial.removed_documents == []
+
+    report = await pipeline.ingest(DOCS[:2], prune_missing=True)
+    remaining = {c.document_id for c in await pipeline.store.all_chunks()}
+
+    assert report.removed_documents == ["news/launch.md"]
+    assert "news/launch.md" in report.changed_documents  # so cached answers built on it are invalidated
+    assert remaining == {"policy/refund.md", "policy/warranty.md"}
+
+
 async def test_retrieve_finds_relevant_chunk_and_flags_confidence(pipeline):
     await pipeline.ingest(DOCS)
 
