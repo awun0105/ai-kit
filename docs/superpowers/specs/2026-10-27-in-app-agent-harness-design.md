@@ -84,7 +84,7 @@ của app, hoặc chạy luôn bản Python làm sidecar nếu app chấp nhận
 Có hai cách triển khai, cùng một spec:
 
 - **Sidecar**: app khởi động harness Python thành tiến trình riêng. App chỉ viết adapter.
-- **Port**: app viết lại harness core bằng ngôn ngữ của mình theo spec, rồi chạy bộ test kiểm tra.
+- **Port**: app viết lại harness core bằng ngôn ngữ của app theo spec, rồi chạy bộ test kiểm tra.
 
 ## 5. Các hợp đồng (phần không phụ thuộc ngôn ngữ)
 
@@ -104,6 +104,9 @@ Mọi hợp đồng là JSON-RPC 2.0, mỗi bản tin một dòng JSON. Tên met
 | `draft.commit(draft_id, base_revision)` | Áp dụng draft thành revision mới; trả `conflict` nếu base đã đổi |
 | `draft.discard(draft_id)` | Bỏ draft |
 | `revision.undo(revision)` | Tạo draft đảo ngược một revision, đi qua validate như mọi draft khác |
+| `draft.materialize(draft_id)` | Tùy chọn. Xuất draft ra một thư mục làm việc và trả đường dẫn, cho agent bên ngoài (mục 5.7) |
+| `draft.sync(draft_id)` | Tùy chọn. Đọc lại thư mục làm việc vào draft; trả lỗi có cấu trúc nếu file không hợp lệ |
+| `effect.run(revision, effect)` | Chạy một thao tác `dangerous` đã duyệt, chỉ sau khi revision được commit (mục 5.5) |
 
 App tự quyết định draft là gì: bản sao thư mục, một transaction chưa commit, một nhánh trong bộ nhớ.
 Spec chỉ yêu cầu draft không ảnh hưởng dữ liệu thật trước `draft.commit`.
@@ -156,6 +159,12 @@ mọi trạng thái đang chạy → Cancelled
 - Ba mức: `ask` (hỏi mọi thao tác `write`), `allow_in_draft` (thao tác `write` trên draft tự cho phép,
   `dangerous` vẫn hỏi), `deny_writes`.
 - `dangerous` **luôn** hỏi người dùng, không policy nào tắt được.
+- Thao tác `dangerous` đã được duyệt **không chạy ngay**: harness ghi thao tác đó vào danh sách tác dụng chờ
+  (pending effects) của draft, và agent nhận kết quả "đã xếp hàng, chạy khi revision được chấp nhận".
+  Màn hình chấp nhận liệt kê lại các tác dụng chờ. Chỉ sau khi `draft.commit` thành công, harness mới
+  chạy chúng theo đúng thứ tự (gọi `effect.run(revision, effect)` của adapter). Draft bị từ chối,
+  conflict, hủy hay lỗi thì các tác dụng chờ bị bỏ. Tác dụng lỗi sau commit không làm mất revision;
+  harness báo lỗi từng tác dụng qua sự kiện `effect.failed`.
 - Yêu cầu xin quyền của agent ACP và `interrupt()` của agent kit đổ về cùng một sự kiện
   `permission.requested`. Trả lời trễ, trùng hoặc sai id bị từ chối.
 - Capability: tạo khi task bắt đầu, có thời hạn, thu hồi khi task kết thúc dù kết thúc kiểu gì.
@@ -164,6 +173,24 @@ mọi trạng thái đang chạy → Cancelled
 
 Mỗi session lưu một file JSONL sự kiện. Văn bản đi qua bộ redaction của guardrails trước khi vào
 transcript, log hay sự kiện gửi UI. Không lưu giá trị API key; chỉ lưu tên biến môi trường đăng nhập.
+
+### 5.7 Agent bên ngoài sửa file và chạy shell
+
+Claude Code, Codex và các agent tương tự tự đọc, sửa file và chạy lệnh, không qua tool của harness.
+Để chúng không chạm dữ liệu thật, harness chạy chúng trong **thư mục làm việc của draft**, như fframes:
+
+1. Khi task bắt đầu, harness gọi `draft.materialize` để có thư mục làm việc, rồi khởi động agent với
+   `cwd` là thư mục đó.
+2. Yêu cầu đọc, ghi file và mở terminal của agent ACP (`fs/*`, `terminal/*`) đi qua harness, và bị
+   từ chối nếu đường dẫn nằm ngoài thư mục làm việc.
+3. Hết lượt, harness gọi `draft.sync` rồi `draft.validate`; từ đây đi tiếp như mọi draft.
+4. Task kết thúc kiểu gì thì thư mục làm việc cũng bị xóa.
+
+Giới hạn cần ghi rõ trong doc: agent tự chạy lệnh shell bằng công cụ riêng (không qua `terminal/*`)
+vẫn có thể ghi ra ngoài thư mục làm việc. Harness bật chế độ sandbox của chính agent khi có
+(ví dụ chế độ chỉ ghi trong workspace của Codex), nhưng không tự làm sandbox cấp hệ điều hành.
+App không hỗ trợ `materialize` thì không nhận agent bên ngoài loại này, chỉ nhận agent dùng tool của
+harness.
 
 ## 6. Bản mẫu Python trong kit
 
@@ -179,12 +206,20 @@ transcript, log hay sự kiện gửi UI. Không lưu giá trị API key; chỉ 
 
 ## 7. Bộ test kiểm tra tuân thủ
 
-- Chạy bằng pytest, nói chuyện với adapter và harness **chỉ qua giao thức**, nên dùng được cho adapter
-  viết bằng ngôn ngữ bất kỳ (truyền lệnh khởi động adapter vào).
+Có **hai bộ**, cùng chạy bằng pytest và chỉ nói chuyện qua giao thức, nên dùng được cho code viết bằng
+ngôn ngữ bất kỳ (truyền lệnh khởi động vào):
+
+- **Bộ cho adapter của app**: harness mẫu bằng Python đóng vai bên gọi, kiểm tra adapter làm đúng mục
+  5.1 (draft không chạm dữ liệu thật, commit báo conflict khi base đổi, undo tạo draft đảo ngược,
+  `materialize`/`sync` nếu adapter khai báo có, `effect.run` chỉ được gọi sau commit).
+- **Bộ cho bản port của harness**: app mẫu và agent ACP giả lập đóng vai hai đầu; bộ test lái harness
+  qua API app gọi harness (mục 11) và kiểm tra các nhóm test bên dưới.
 - Có **app mẫu** viết bằng Python (một app ghi chú hoặc danh sách việc đơn giản) với adapter đầy đủ, để
   bộ test có đối tượng chạy và để làm ví dụ viết adapter.
 - Có **agent ACP giả lập** (scripted) để test không cần model thật, giống cách fframes test workflow.
-- Các nhóm test tối thiểu: tool `write` không chạm dữ liệu thật trước commit; `dangerous` luôn hỏi;
+- Các nhóm test tối thiểu cho harness: tool `write` không chạm dữ liệu thật trước commit; `dangerous`
+  luôn hỏi và chỉ chạy sau commit, bị bỏ khi từ chối; agent bên ngoài không ghi được ra ngoài thư mục
+  làm việc qua `fs/*`;
   trả lời quyền trễ hoặc trùng bị từ chối; validate lỗi dẫn tới đúng một lần sửa; conflict khi base
   đổi; hoàn tác đưa app về revision trước; capability hết hiệu lực sau khi task kết thúc; hủy task ở
   mọi trạng thái đang chạy.
@@ -199,9 +234,10 @@ cùng (đọc qua `app.context`) và `pass_rate` khi chạy lặp.
 
 Một trang doc nói rõ:
 
-- Phần cần port: state machine, permission policy, capability, broker, driver ACP.
+- Phần cần port: state machine, permission policy, capability, broker, tác dụng chờ, thư mục làm
+  việc, driver ACP.
 - Phần nên giữ ở Python và gọi qua MCP: RAG, guardrails dùng LLM, eval.
-- Cách chạy bộ test kiểm tra với bản port.
+- Cách chạy bộ test cho adapter (với mỗi app) và bộ test cho harness (với bản port).
 - Khi nào chọn sidecar, khi nào port (đóng gói, khởi động, RAM; hiệu năng xử lý không phải lý do).
 
 ## 10. Ràng buộc
@@ -219,6 +255,10 @@ Một trang doc nói rõ:
   (người dùng quyết định).
 - Lấy fframes Studio làm mẫu (người dùng quyết định).
 - Sidecar Python là một lựa chọn hợp lệ cho app (người dùng chấp nhận).
+- Agent bên ngoài chạy trong thư mục làm việc riêng của draft (mục 5.7) (người dùng quyết định).
+- Thao tác `dangerous` chờ tới khi revision được chấp nhận mới chạy (mục 5.5) (người dùng quyết định).
+- Có hai bộ test kiểm tra: cho adapter của app và cho bản port của harness (mục 7) (người dùng quyết
+  định).
 
 **Quyết định của người viết tài liệu (cần người dùng xem lại):**
 
@@ -232,7 +272,7 @@ Một trang doc nói rõ:
 - **API app gọi harness** đi trên cùng kết nối JSON-RPC hai chiều với adapter: `task.start(goal,
   scope)`, `task.cancel`, `permission.reply(id, choice)`, `candidate.accept`, `candidate.reject`,
   `revision.undo`; harness gửi sự kiện `task.*`, `permission.*`, `message.*` cho app.
-- **Driver cho agent của kit** nằm ngoài `app/services/` (như `app/acp_agent.py`), vì nó dùng
+- **Driver cho agent của kit** nằm ngoài `app/services/` (như `app/acp_agent.py`), vì driver này dùng
   graph của app; harness core trong `app/services/harness/` không import graph. Sidecar dùng
   cấu hình offline (SQLite) nên không cần Postgres.
 - **Hoàn tác** chỉ áp dụng cho revision mới nhất; **chấp nhận một phần** để đợt sau.
@@ -247,11 +287,3 @@ app.acp_agent`) và bộ offline (`docs/offline.md`).
 - Tên method cuối cùng, stdio hay socket cục bộ cho adapter, định dạng chi tiết của diff và transcript.
 - Cấu trúc thư mục bên trong `app/services/harness/`.
 - Thứ tự commit, miễn mỗi bước có test.
-
-## 13. Câu hỏi còn mở (người dùng quyết)
-
-1. Với agent bên ngoài (Claude Code, Codex) vốn tự sửa file và chạy shell: chạy agent trong một
-   thư mục bản nháp riêng như fframes, hay chỉ đảm bảo draft cho các thao tác đi qua harness?
-2. Thao tác `dangerous` (gửi đi, xóa tài nguyên bên ngoài, xuất file): chờ tới lúc commit mới
-   chạy, hay chạy ngay sau khi người dùng duyệt?
-3. Bộ test kiểm tra dùng để chứng nhận adapter của app, bản port của harness, hay cả hai?
