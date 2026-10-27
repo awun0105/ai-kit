@@ -23,3 +23,7 @@ wheels/
 evals/reports/
 reports/
 .flashrank_cache/
+
+# Code indexes (CodeGraph, graphify)
+.codegraph/
+graphify-out/
