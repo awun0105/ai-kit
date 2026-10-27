@@ -141,8 +141,11 @@ class Settings:
         self.API_V1_STR = os.getenv("API_V1_STR", "/api/v1")
         self.DEBUG = os.getenv("DEBUG", "false").lower() in ("true", "1", "t", "yes")
 
-        # CORS Settings
+        # CORS Settings (production defaults to no cross-origin access; list your front-end origins)
         self.ALLOWED_ORIGINS = parse_list_from_env("ALLOWED_ORIGINS", ["*"])
+
+        # Bearer token required to scrape /metrics; empty leaves it open (keep it on a private network)
+        self.METRICS_TOKEN = os.getenv("METRICS_TOKEN", "")
 
         # Langfuse Configuration
         self.LANGFUSE_TRACING_ENABLED = os.getenv("LANGFUSE_TRACING_ENABLED", "true").lower() in (
@@ -349,6 +352,7 @@ class Settings:
             Environment.PRODUCTION: {
                 "DEBUG": False,
                 "LOG_LEVEL": "WARNING",
+                "ALLOWED_ORIGINS": [],
                 "RATE_LIMIT_DEFAULT": ["200 per day", "50 per hour"],
             },
             Environment.TEST: {

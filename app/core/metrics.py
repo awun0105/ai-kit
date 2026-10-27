@@ -3,6 +3,8 @@
 This module sets up and configures Prometheus metrics for monitoring the application.
 """
 
+import hmac
+
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     Counter,
@@ -85,12 +87,7 @@ session_names_generated_total = Counter(
 )
 
 
-async def metrics(request: Request) -> Response:
-    """Expose every registered metric in the Prometheus text format."""
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
-
-def setup_metrics(app):
+def setup_metrics(app, token: str = ""):
     """Expose ``/metrics``. Request metrics come from ``MetricsMiddleware``.
 
     ``starlette_prometheus`` was removed: it is unmaintained, duplicated
@@ -99,5 +96,14 @@ def setup_metrics(app):
 
     Args:
         app: FastAPI application instance
+        token: When set, scrapers must send ``Authorization: Bearer <token>``; metrics name
+            models, routes and error rates, which is reconnaissance for an attacker.
     """
+    expected = f"Bearer {token}".encode()
+
+    async def metrics(request: Request) -> Response:
+        if token and not hmac.compare_digest(request.headers.get("authorization", "").encode(), expected):
+            return Response(status_code=401)
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
     app.add_route("/metrics", metrics)

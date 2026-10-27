@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from langchain_core.messages import (
     AIMessage,
@@ -14,11 +15,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.api.v1 import chatbot
 from app.api.v1.auth import get_current_session
 from app.core.cache import InMemoryCacheService
+from app.core.config import Settings
 from app.core.kit import (
     set_cost_guard,
     set_guardrails,
 )
 from app.core.langgraph.graph import LangGraphAgent
+from app.core.metrics import setup_metrics
 from app.main import app
 from app.schemas import Message
 from app.services.agents import ResilientChatModel
@@ -231,3 +234,23 @@ def test_release_scans_the_image_before_pushing_it():
     pushes = [i for i, step in enumerate(steps) if step.get("with", {}).get("push") is True]
 
     assert pushes and all(scan < i for i in pushes)
+
+
+def test_metrics_need_the_token_when_one_is_set():
+    metrics_app = FastAPI()
+    setup_metrics(metrics_app, token="scrape-me")
+    client = TestClient(metrics_app)
+
+    assert client.get("/metrics").status_code == 401
+    assert client.get("/metrics", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    assert client.get("/metrics", headers={"Authorization": "Bearer scrape-me"}).status_code == 200
+
+
+def test_production_allows_no_cross_origin_calls_by_default(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+
+    assert Settings().ALLOWED_ORIGINS == []
+
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://app.example.com")
+    assert Settings().ALLOWED_ORIGINS == ["https://app.example.com"]

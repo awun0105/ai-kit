@@ -19,7 +19,8 @@ cp .env.example .env.development
 | `VERSION` | `1.0.0` | API version |
 | `DEBUG` | `false` | Enables debug logging and profiling middleware |
 | `API_V1_STR` | `/api/v1` | API prefix |
-| `ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins |
+| `ALLOWED_ORIGINS` | `*` (none in production) | Comma-separated CORS origins. With `*`, credentials are not allowed |
+| `METRICS_TOKEN` | – | When set, `/metrics` requires `Authorization: Bearer <token>` (set it in `prometheus/prometheus.yml` too). Otherwise keep `/metrics` on a private network |
 
 ---
 

@@ -139,7 +139,7 @@ app = FastAPI(
 )
 
 # Set up Prometheus metrics
-setup_metrics(app)
+setup_metrics(app, token=settings.METRICS_TOKEN)
 
 # Add logging context middleware (must be added before other middleware to capture context)
 app.add_middleware(LoggingContextMiddleware)
@@ -195,7 +195,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
+    # Credentials with a wildcard origin would let any site make authenticated calls from a browser.
+    allow_credentials="*" not in settings.ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

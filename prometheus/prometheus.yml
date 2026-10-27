@@ -9,6 +9,9 @@ scrape_configs:
   - job_name: 'fastapi'
     metrics_path: '/metrics'
     scheme: 'http'
+    # When the app sets METRICS_TOKEN:
+    # authorization:
+    #   credentials: '<METRICS_TOKEN>'
     static_configs:
       - targets: ['app:8000']
 
