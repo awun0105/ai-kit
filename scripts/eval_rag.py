@@ -60,6 +60,7 @@ def _args() -> argparse.Namespace:
     p.add_argument("--min-correctness", type=float, default=3.5)
     p.add_argument("--min-refusal", type=float, default=0.66)
     p.add_argument("--max-bad-citations", type=float, default=0.1)
+    p.add_argument("--max-error-rate", type=float, default=0.0, help="Share of items whose run or grading failed")
     return p.parse_args()
 
 
@@ -117,6 +118,7 @@ async def main() -> int:
             "answers.correctness": args.min_correctness,
             "answers.refusal_accuracy": args.min_refusal,
             "answers.bad_citation_rate": args.max_bad_citations,
+            "answers.error_rate": args.max_error_rate,
         }
 
     config = {

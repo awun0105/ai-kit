@@ -51,6 +51,7 @@ documents: easy, medium, hard, adversarial) is the default.
 | `answers.citation_support` | judge, 1–5: `[n]` labels point at supporting passages | reported |
 | `answers.refusal_accuracy` | adversarial items the agent declined or corrected | ≥ 0.66 |
 | `answers.bad_citation_rate` | answers citing a source number that was never retrieved | ≤ 0.10 |
+| `answers.error_rate` | items whose agent run or grading failed; they also count in `n`, so a half-broken agent cannot pass on the half that worked | ≤ 0.0 (`--max-error-rate`) |
 | `answers.p95_latency_s` | per-question latency | reported |
 
 Every metric is also broken down by `difficulty`. Override gates with `--min-hit`,

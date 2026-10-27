@@ -136,12 +136,16 @@ async def evaluate_answers(
 
 
 def summarize_answers(items: list[GoldenItem], results: dict[str, ItemResult]) -> dict[str, dict[str, float]]:
-    """Mean judge scores overall and per difficulty, plus refusal and citation rates."""
+    """Mean judge scores overall and per difficulty, plus error, refusal and citation rates.
+
+    Items whose agent run or grading failed count in ``n`` and ``error_rate``: averaging
+    only the items that worked would let a half-broken agent pass every score gate.
+    """
     groups: dict[str, list[ItemResult]] = {"all": []}
     for item in items:
         r = results.get(item.id)
-        if r is None or r.answer is None:
-            continue
+        if r is None or (r.answer is None and r.error is None):
+            continue  # retrieval-only run: no answer was attempted
         groups["all"].append(r)
         groups.setdefault(item.difficulty, []).append(r)
 
@@ -149,17 +153,18 @@ def summarize_answers(items: list[GoldenItem], results: dict[str, ItemResult]) -
     if not groups["all"]:
         return summary
     for name, rs in groups.items():
+        answered = [r for r in rs if r.answer is not None]
         graded = [r for r in rs if r.grade]
         refusals = [r for r in rs if r.refusal_correct is not None]
-        row: dict[str, float] = {"n": len(rs)}
+        row: dict[str, float] = {"n": len(rs), "error_rate": round(sum(r.error is not None for r in rs) / len(rs), 3)}
         if graded:
             for metric in ("faithfulness", "correctness", "citation_support"):
                 row[metric] = round(sum(getattr(r.grade, metric) for r in graded) / len(graded), 3)  # type: ignore[union-attr]
         if refusals:
             row["refusal_accuracy"] = round(sum(bool(r.refusal_correct) for r in refusals) / len(refusals), 3)
-        if rs:
-            row["bad_citation_rate"] = round(sum(bool(r.citations_out_of_range) for r in rs) / len(rs), 3)
-            latencies = sorted(r.latency_s for r in rs if r.latency_s is not None)
+        if answered:
+            row["bad_citation_rate"] = round(sum(bool(r.citations_out_of_range) for r in answered) / len(answered), 3)
+            latencies = sorted(r.latency_s for r in answered if r.latency_s is not None)
             if latencies:
                 row["p95_latency_s"] = latencies[min(len(latencies) - 1, int(0.95 * len(latencies)))]
         summary[name] = row
@@ -173,7 +178,7 @@ def apply_gates(report: EvalReport, thresholds: dict[str, float]) -> None:
         value = getattr(report, section, {}).get("all", {}).get(metric)
         if value is None:
             continue
-        lower_is_better = metric in ("bad_citation_rate", "p95_latency_s")
+        lower_is_better = metric in ("error_rate", "bad_citation_rate", "p95_latency_s")
         passed = value <= threshold if lower_is_better else value >= threshold
         report.gates.append(Gate(metric=key, value=value, threshold=threshold, passed=passed))
 

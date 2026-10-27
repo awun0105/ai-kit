@@ -10,6 +10,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.core.langgraph.graph import LangGraphAgent
 from app.core.langgraph.tools.knowledge_search import knowledge_search
 from app.services.evaluation import (
+    AnswerGrade,
     AnswerJudge,
     GoldenItem,
     build_report,
@@ -20,6 +21,7 @@ from app.services.evaluation import (
     score_retrieval,
     to_markdown,
 )
+from app.services.evaluation.runner import ItemResult
 from app.services.rag import (
     HashingEmbedder,
     InMemoryVectorStore,
@@ -137,6 +139,25 @@ async def test_answers_are_run_through_the_real_graph_and_judged(monkeypatch):
     assert report.answers["all"]["bad_citation_rate"] == 0.0  # [9] in an answer without retrieval is not checked
     assert [g.passed for g in report.gates] == [True, False]
     assert "**FAIL**" in to_markdown(report)
+
+
+def test_failed_items_count_against_the_answer_gates():
+    # An agent that errors on half the questions must not pass on the half that worked.
+    items = [GoldenItem(id="ok", question="q1"), GoldenItem(id="boom", question="q2")]
+    grade = AnswerGrade(faithfulness=5, correctness=5, citation_support=5, declined=False, rationale="ok")
+    results = {
+        "ok": ItemResult(id="ok", difficulty="unspecified", question="q1", answer="fine", grade=grade),
+        "boom": ItemResult(id="boom", difficulty="unspecified", question="q2", error="RuntimeError: provider down"),
+    }
+
+    report = build_report("t", {}, items, results, {"answers.faithfulness": 4.0, "answers.error_rate": 0.0})
+
+    assert report.answers["all"]["error_rate"] == 0.5
+    assert report.answers["all"]["n"] == 2
+    assert [(g.metric, g.passed) for g in report.gates] == [
+        ("answers.faithfulness", True),
+        ("answers.error_rate", False),
+    ]
 
 
 async def test_pairwise_judge_reports_position_bias():
