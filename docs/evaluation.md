@@ -170,6 +170,17 @@ EVALUATION_API_KEY=...   # defaults to OPENAI_API_KEY if not set
 | `scripts/eval_rag.py` | CLI |
 | `tests/test_evaluation.py` | Metric maths and the offline retrieval regression gate |
 
+## When you plug it in
+
+- Keep the `answers.error_rate` gate at 0 (or a small number you chose on purpose): failed
+  items count against the run instead of disappearing from the averages.
+- The judge must be a different model from the one under test.
+
+## Copy this module
+
+Copy `app/services/evaluation/` with `tests/test_evaluation.py` and `scripts/eval_rag.py`.
+It imports the RAG package for retrieval runs and nothing from the app.
+
 ## Provenance
 
 | Part | Source |

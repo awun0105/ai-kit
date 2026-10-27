@@ -98,6 +98,24 @@ Leave reranking off unless a golden-set evaluation shows it helps.
 - Scanned PDFs need OCR; MarkItDown only extracts embedded text. Use
   [Docling](https://github.com/docling-project/docling) for scanned or table-heavy PDFs.
 
+## When you plug it in
+
+- Re-ingesting drops chunks a document no longer has; pass `prune_missing=True`
+  (`scripts.ingest --prune`) only when the batch is the **whole** corpus, or documents
+  outside the batch are deleted.
+- Feed `IngestReport.changed_documents` to `AnswerCache.invalidate`, or cached answers keep
+  quoting removed text.
+- Use the same `TokenizerMode` at ingestion and query time; changing it requires re-ingesting.
+- Tool output is untrusted: put `knowledge_search` behind the graph's tool node or
+  `guard_tools` so instruction-like text in documents is neutralized.
+
+## Copy this module
+
+Copy `app/services/rag/` with `tests/test_rag.py` (and `tests/test_rag_pgvector.py`).
+It needs `app/core/metrics.py` only if you keep the citation metric in the graph; the package
+itself imports nothing from the app. Build it with `RAGPipeline(embedder, store, ...)`, or
+read `build_pipeline_from_settings` in `app/core/kit.py` for a settings-driven version.
+
 ## Provenance
 
 | Part | Source |

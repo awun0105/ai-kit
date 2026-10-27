@@ -68,3 +68,10 @@ At startup, `memory_service.initialize()` is called in the app lifespan. This es
 ## Per-user isolation
 
 Each user's memories are stored and searched independently using `user_id` as the namespace. Users cannot access each other's memories.
+
+## Outside the reliability layer
+
+mem0 builds its own OpenAI client for fact extraction and embeddings, so those calls do not go
+through `ResilientInvoker` (no shared retry budget, breakers or fallback), are not traced in
+Langfuse, and are not counted by the cost guard. Wrapping them would mean replacing mem0's LLM
+and embedder providers; budget for them separately.

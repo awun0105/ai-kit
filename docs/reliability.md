@@ -126,6 +126,23 @@ Other metrics: `llm_attempts_total{model, outcome}`, `llm_breaker_state{model}`
 | `app/services/llm/service.py`, `registry.py` | Ladder construction, SDK retries off, tool capability |
 | `prometheus/alerts.yml`, `alerts_test.yml` | SLO recording rules, burn-rate alerts, promtool tests |
 
+## When you plug it in
+
+- The total timeout must fit `max_attempts x attempt_timeout` plus one attempt on a fallback
+  model; `check_timeout_budget` enforces it. Otherwise a hung provider uses the whole budget
+  and the ladder never fails over.
+- Keep SDK retries off (`max_retries=0`) for every model behind `ResilientInvoker`.
+- `AnswerCache(shared=True)` serves one user's answer to all users: only safe when that answer
+  came from a prompt with no user name or memory. Otherwise use `shared=False` and pass
+  `user_id` on every call.
+
+## Copy this module
+
+Copy `app/services/reliability/` with `tests/test_reliability.py` and
+`tests/test_answer_cache.py`. It imports `app/core/metrics.py` for the attempt, breaker and
+latency metrics; copy those definitions or remove the calls. Wire it the way
+`app/services/llm/service.py` (invoker) and `app/core/kit.py` (answer cache) do.
+
 ## Provenance
 
 Specification: AI20K D25 lab "Game Day: Retry Storm, Circuit Breaker, Cache, Idempotency &

@@ -118,6 +118,24 @@ Every intervention is logged (`guard_*` events) and counted in the Prometheus me
 | `app/services/guardrails/policy.py` | `Guardrails` facade, tool policy, `StreamingRedactor` |
 | `app/core/langgraph/graph.py` | `input_guard` node, tool authorization, output redaction, stream redaction |
 
+## When you plug it in
+
+- Every tool an agent can call must go through a tool rail: the app graph's tool node, or
+  `guard_tools(tools, guard)` for sub-agents and `create_agent` loops. Raw tools skip approval,
+  egress checks and output screening.
+- An LLM rail call made inside a streaming graph must carry the `nostream` tag, or its verdict
+  is streamed to the client (`app/core/kit.py` does this).
+- A tool that calls `interrupt()` itself belongs in `INTERRUPTING_TOOLS` so it runs before
+  side-effecting tools of the same turn.
+- New tools with side effects go into `GUARD_APPROVAL_TOOLS`.
+
+## Copy this module
+
+Copy `app/services/guardrails/` with `tests/test_guardrails.py` and
+`tests/fixtures/guardrails/`. Its only app import is `app/core/metrics.py`
+(`guardrail_events_total`); copy that counter or drop the `_record` calls. Build
+`Guardrails(...)` directly, or see `build_guardrails_from_settings` in `app/core/kit.py`.
+
 ## Provenance
 
 | Part | Source |

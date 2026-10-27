@@ -39,6 +39,14 @@ make ingest CORPUS=path/to/docs  # load documents into the knowledge base
 
 Update a generated app with later kit improvements: `uvx copier update --trust`.
 
+### Take one component into another project
+
+Each layer under `app/services/` (rag, guardrails, reliability, evaluation, mcp, a2a, agents,
+cost_guard) imports on its own: no settings, database or model registry, which
+`tests/test_toolbox_imports.py` checks. Copy the package with its tests and follow the
+**Copy this module** and **When you plug it in** sections of its doc; `app/core/kit.py` shows
+how the app builds each one from settings.
+
 ### First request
 
 ```bash
@@ -72,6 +80,7 @@ app/
   api/v1/                 route handlers (auth, chat, streaming)
   core/langgraph/         agent graph: input guard -> chat -> tools (approval, screening) -> output rail
   core/                   settings, logging, metrics, middleware, cache, rate limits, prompts
+  core/kit.py             wiring: builds each toolbox component from settings (get_*/set_*)
   services/
     llm/                  model registry and the resilient call path
     reliability/          error classes, retry budget, circuit breakers, invoker, answer cache

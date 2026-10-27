@@ -74,6 +74,20 @@ Whether a cited source actually supports the sentence is a semantic question for
 `langgraph-supervisor` and `open_deep_research` are archived upstream; `deepagents` is the
 maintained harness for supervisor/sub-agent patterns.
 
+## When you plug it in
+
+- Build agents on `ResilientChatModel(service=llm_service)`, never a bare provider model, so
+  every call shares the retry budget and breakers.
+- Hand agents `guard_tools(tools, guard)`, not raw tools.
+- Run agents inside a turn that carries the cost guard's `TurnUsage` handler, or their calls
+  are not charged.
+
+## Copy this module
+
+Copy `app/services/agents/` with `tests/test_agents.py`; it needs `app/services/rag/citations.py`
+for the citation check. `build_deep_research_tool(model, tools, ...)` takes the model and tools
+as arguments; `app/main.py` shows the wiring.
+
 ## Provenance
 
 | Part | Source |

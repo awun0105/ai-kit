@@ -85,6 +85,19 @@ every `/api` request.
 | `COST_PRICES_JSON` | – | `{"model": [input_per_1M, output_per_1M]}` |
 | `COST_DEFAULT_INPUT_PER_1M` / `COST_DEFAULT_OUTPUT_PER_1M` | `0` | Price for models missing from the table |
 
+## When you plug it in
+
+- Scan the image before pushing it; a scan after the push blocks nothing.
+- Run each turn with a `TurnUsage` handler in its callbacks and record that, not the stored
+  messages: the stored messages miss the policy rail and every sub-agent call.
+- List prices by model name prefix; providers report dated snapshot names.
+
+## Copy this module
+
+The cost guard is `app/services/cost_guard.py` with its tests in `tests/test_deploy.py`. It
+needs a cache with async `get`/`set` (`app/core/cache.py`, or your own) and nothing else from
+the app; `get_cost_guard` in `app/core/kit.py` shows the wiring.
+
 ## Provenance
 
 | Part | Source |

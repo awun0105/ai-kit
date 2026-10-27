@@ -98,6 +98,21 @@ screened like any tool output.
 - The A2A server answers synchronously (no streaming, no push notifications) and keeps
   tasks in memory; use `a2a-sdk`'s SQL task store for multi-instance deployments.
 
+## When you plug it in
+
+- MCP and A2A tools are untrusted: keep them behind the graph's tool node, or wrap them with
+  `guard_tools` before handing them to a sub-agent.
+- Give each calling agent its own A2A token (`A2A_SERVER_TOKENS`): the caller is part of the
+  thread id and the user id, so callers cannot reach each other's conversations and spend is
+  counted per caller.
+- Limit MCP servers with `MCP_TOOL_ALLOWLIST`; a server may expose far more than you need.
+
+## Copy this module
+
+Copy `app/services/mcp/` (and `app/mcp_server.py`) with `tests/test_mcp.py`, or
+`app/services/a2a/` with `tests/test_a2a.py`. Neither imports app settings;
+`a2a/server.py` uses `app.schemas.Message` in `agent_ask`, the adapter for this app's agent.
+
 ## Provenance
 
 | Part | Source |
