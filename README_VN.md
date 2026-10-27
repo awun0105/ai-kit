@@ -1,6 +1,6 @@
 <a id="top"></a>
 
-<p align="center"><img src="./assets/banner.png" alt="AI Kit — bộ công cụ phát triển agent" /></p>
+![AI Kit — bộ công cụ phát triển agent](assets/banner.png)
 
 <div align="center">
 
