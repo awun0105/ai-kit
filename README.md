@@ -45,7 +45,8 @@ chạy được, nên project mới có thể bắt đầu từ cả app, hoặc
 - **RAG (trả lời dựa trên tài liệu):** ingest (nạp) md, txt, pdf, docx, html; hybrid search (tìm kiếm kết hợp) pgvector với BM25 có word segmentation (tách từ) tiếng Việt; reranker (xếp hạng lại) tùy chọn; câu trả lời có citation (trích dẫn) được kiểm tra.
 - **Guardrails:** chặn prompt injection (chèn lệnh độc hại vào prompt) và PII (dữ liệu cá nhân) bằng tiếng Anh lẫn tiếng Việt, LLM rail (model phân loại theo chính sách) tùy chọn, approval (duyệt tay) cho tool rủi ro, egress allowlist (danh sách đích được phép gọi ra ngoài), redaction (che dữ liệu) ngay khi streaming (trả chữ dần).
 - **Reliability (độ tin cậy):** một lớp retry duy nhất có retry budget (ngân sách thử lại), circuit breaker (ngắt mạch) cho từng model, fallback ladder (chuỗi model dự phòng), answer cache (bộ nhớ đệm câu trả lời) trả bản cũ khi nhà cung cấp gặp sự cố.
-- **Tools và agents:** MCP client và server, A2A (giao tiếp giữa các agent) server và client, deep-research team (nhóm agent nghiên cứu sâu), `ResilientChatModel` dùng được cho mọi agent LangChain.
+- **Tools và agents:** MCP client và server, A2A (giao tiếp giữa các agent) server và client, deep-research team (nhóm agent nghiên cứu sâu), ACP agent (nhúng agent của kit vào Zed, JetBrains hay app riêng), `ResilientChatModel` dùng được cho mọi agent LangChain.
+- **Offline:** chạy trên máy người dùng không cần server: checkpoint và knowledge base trong SQLite, embedding chạy trong process (FastEmbed), model local qua Ollama hoặc llama.cpp.
 - **Evaluation:** golden set (bộ câu hỏi chuẩn) với retrieval metrics (chỉ số truy xuất), judge (model chấm điểm) riêng, tool trajectory (kiểm tra chuỗi tool được gọi), repeated runs (chạy lặp nhiều lần), simulated user (người dùng giả lập) hội thoại multi-turn (nhiều lượt) và gate (ngưỡng chặn) trong CI.
 - **Delivery (phát hành):** Docker image chạy non-root (không dùng quyền root), đẩy lên GHCR sau khi scan (quét lỗ hổng) bằng Trivy, alert (cảnh báo) Prometheus, cost guard (giới hạn chi phí hằng tháng cho từng người dùng).
 
@@ -128,7 +129,7 @@ judge. Các tùy chọn như `--runs 3` và `--scenarios` có trong [docs/evalua
 Nên đọc [docs/ROADMAP.md](docs/ROADMAP.md) trước: danh sách các phần, trạng thái và nguồn gốc của
 từng phần. Mỗi phần có trang riêng: [RAG](docs/rag.md), [guardrails](docs/guardrails.md),
 [reliability](docs/reliability.md), [tools](docs/tools.md), [agents](docs/agents.md),
-[evaluation](docs/evaluation.md), [conversation history](docs/compaction.md) (lịch sử hội thoại),
+[evaluation](docs/evaluation.md), [conversation history](docs/compaction.md) (lịch sử hội thoại), [offline](docs/offline.md),
 [deployment](docs/deployment.md) (triển khai). Settings nằm trong [docs/configuration.md](docs/configuration.md);
 quy tắc viết code cho người và coding agent (agent viết code) nằm trong [AGENTS.md](AGENTS.md). Tài liệu chi tiết
 hiện chỉ có bản tiếng Anh.

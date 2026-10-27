@@ -25,10 +25,14 @@ TOOLBOX = [
 APP_MODULES = ["app.core.config", "app.core.logging", "app.services.llm", "app.services.database", "app.core.kit"]
 
 
-@pytest.mark.parametrize("module", TOOLBOX + ["app.services.a2a.server", "app.services.a2a.client"])
+@pytest.mark.parametrize(
+    "module", TOOLBOX + ["app.services.a2a.server", "app.services.a2a.client", "app.services.acp"]
+)
 def test_toolbox_module_imports_without_the_app(module):
     if module.startswith("app.services.a2a"):
         pytest.importorskip("a2a")
+    if module.startswith("app.services.acp"):
+        pytest.importorskip("acp")
     probe = f"import sys, {module}; print(','.join(m for m in {APP_MODULES!r} if m in sys.modules))"
     # No APP_ENV, no JWT secret, no API key, and no .env file to fall back on: run from an empty directory.
     env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT)}

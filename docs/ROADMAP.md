@@ -24,6 +24,7 @@ LLM-as-judge evals, Docker Compose.
 | 8 | Packaging: `copier` template + `scripts/bootstrap.py`, kit README, `ai-kit` agent skill (in `~/.agents/skills/ai-kit`) | done | – |
 | 9 | Toolbox hardening: each component imports on its own (wiring in `app/core/kit.py`, checked by `tests/test_toolbox_imports.py`), safe defaults when plugged in (`guard_tools`, `nostream` rail, `AnswerCache(shared=...)`, per-caller A2A, timeout budget check), a "When you plug it in" and "Copy this module" section in every layer doc | done | review of the kit |
 | 10 | Lessons from Google ADK: history budget fix and compaction ([docs/compaction.md](compaction.md)); tool trajectory, repeated runs, efficiency gates, judge samples, simulated users ([docs/evaluation.md](evaluation.md)) | done | google/adk-python `2084efb` (ideas, rewritten) |
+| 11 | Embedding: the kit's agent as an ACP agent ([docs/tools.md](tools.md#acp-agent)); offline extra: SQLite checkpoints and vector store, FastEmbed, models from settings ([docs/offline.md](offline.md)) | done | agentclientprotocol/python-sdk; fframes Studio driver model |
 
 ## Rules for every layer
 

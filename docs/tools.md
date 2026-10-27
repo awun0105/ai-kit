@@ -1,4 +1,4 @@
-# Tools: built-in, MCP and A2A
+# Tools: built-in, MCP, A2A and ACP
 
 The agent's tools come from three places. All of them run through the same tool
 node, so the [guardrails](guardrails.md) apply equally: approval for listed tools,
@@ -92,11 +92,47 @@ The model gets one `ask_remote_agent(agent, message)` tool listing the configure
 It can only reach agents the operator configured, never a URL from a prompt. Replies are
 screened like any tool output.
 
+## ACP agent
+
+[Agent Client Protocol](https://agentclientprotocol.com) clients are the apps a user works in:
+Zed, JetBrains IDEs, fframes Studio, or your own app in C++, Rust or anything else that can start
+a subprocess. They start the agent and talk JSON-RPC over its stdin and stdout. The kit's agent is
+one of them:
+
+```bash
+uv sync --extra acp
+python -m app.acp_agent          # what the client runs; with the offline settings it needs no server
+```
+
+In Zed, for example, add it under `agent_servers` in `settings.json` (check
+[Zed's external agents docs](https://zed.dev/docs/ai/external-agents) for the current format):
+
+```json
+{"agent_servers": {"ai-kit": {"command": "uv",
+  "args": ["run", "--directory", "/path/to/your-app", "--extra", "acp", "python", "-m", "app.acp_agent"],
+  "env": {"APP_ENV": "development"}}}}
+```
+
+- **Sessions.** Each ACP session is one LangGraph thread (`acp-<session id>`); RAG, guardrails,
+  retries, the cost guard and history compaction work as in the HTTP app.
+- **Approvals.** A tool listed in `GUARD_APPROVAL_TOOLS` becomes an ACP permission request; the
+  client's user picks Allow or Reject, and the agent resumes with that answer. A cancelled request
+  counts as Reject.
+- **Questions.** `ask_human` ends the turn with the question; the user's next prompt answers it.
+- **stdout.** stdout carries the protocol, so the entry point imports
+  `app.services.acp.reserve_stdout` before anything else: the protocol gets a private copy of
+  stdout and file descriptor 1 points at stderr, where every log line and library warning goes.
+- **Your own agent.** `KitAcpAgent` serves any `AgentBackend` (`turn(session_id, text) ->
+  TurnResult`); `app/acp_agent.py` is the adapter for this app's `LangGraphAgent`.
+
 ## Limits
 
 - MCP tools are discovered once at startup; restart to pick up new server tools.
 - The A2A server answers synchronously (no streaming, no push notifications) and keeps
   tasks in memory; use `a2a-sdk`'s SQL task store for multi-instance deployments.
+- The ACP agent sends each reply as one message (no token streaming), does not load earlier
+  sessions (`loadSession` is off), ignores MCP servers the client offers, and stops a cancelled
+  turn at its next step rather than in the middle of a model call.
 
 ## When you plug it in
 
@@ -106,12 +142,19 @@ screened like any tool output.
   thread id and the user id, so callers cannot reach each other's conversations and spend is
   counted per caller.
 - Limit MCP servers with `MCP_TOOL_ALLOWLIST`; a server may expose far more than you need.
+- An ACP entry point must keep stdout for the protocol (import `app.services.acp.reserve_stdout`
+  first). One stray `print` on stdout breaks the client.
+- The ACP agent runs with the permissions of the user who started the client; the client is the
+  trust boundary, so it takes no token. Long-term memory and the cost budget use the user id
+  `acp:local`.
 
 ## Copy this module
 
 Copy `app/services/mcp/` (and `app/mcp_server.py`) with `tests/test_mcp.py`, or
 `app/services/a2a/` with `tests/test_a2a.py`. Neither imports app settings;
 `a2a/server.py` uses `app.schemas.Message` in `agent_ask`, the adapter for this app's agent.
+For ACP, copy `app/services/acp/` with `tests/test_acp.py`; it needs only `agent-client-protocol`
+and `structlog`, and `app/acp_agent.py` shows the adapter to write for your agent.
 
 ## Provenance
 
@@ -120,3 +163,4 @@ Copy `app/services/mcp/` (and `app/mcp_server.py`) with `tests/test_mcp.py`, or
 | MCP over streamable HTTP with bearer auth, evidence tools | Author's solution to the AI20K D09 MultiAgent-MCP-A2A lab (`src/student_agent/mcp_gateway.py`) |
 | MCP client | [`langchain.mcp`](https://github.com/langchain-ai/langchain/tree/master/libs/langchain_v1/langchain/mcp) (MIT), [FastMCP](https://github.com/PrefectHQ/fastmcp) (Apache-2.0), [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) (MIT) |
 | A2A | [a2a-python](https://github.com/a2aproject/a2a-python) (Apache-2.0), structure from the official [helloworld sample](https://github.com/a2aproject/a2a-samples/tree/main/samples/python/agents/helloworld) |
+| ACP | [agentclientprotocol/python-sdk](https://github.com/agentclientprotocol/python-sdk) 0.12.1 (Apache-2.0). Approval and question handling follows fframes Studio's driver model (`desktop/crates/studio-harness/src/driver/api.rs`, commit `a8dc7985`), rewritten |
