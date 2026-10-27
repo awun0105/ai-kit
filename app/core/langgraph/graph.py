@@ -62,7 +62,10 @@ from app.services.guardrails import (
     is_affirmative,
 )
 from app.services.llm import llm_service
-from app.services.cost_guard import get_cost_guard
+from app.services.cost_guard import (
+    TurnUsage,
+    get_cost_guard,
+)
 from app.services.memory import memory_service
 from app.services.rag.citations import (
     check_answer,
@@ -473,7 +476,10 @@ class LangGraphAgent:
             list[Message]: The response from the LLM.
         """
         graph = await self._get_graph()
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.LANGFUSE_TRACING_ENABLED else []
+        usage = TurnUsage()  # every model call of this turn, nested ones included, for the cost guard
+        callbacks: list[BaseCallbackHandler] = [usage]
+        if settings.LANGFUSE_TRACING_ENABLED:
+            callbacks.append(langfuse_callback_handler)
         config: RunnableConfig = {
             "configurable": {"thread_id": session_id},
             "callbacks": callbacks,
@@ -530,7 +536,7 @@ class LangGraphAgent:
                 return [Message(role="assistant", content=str(interrupt_value))]
 
             create_background_task(memory_service.add(user_id, response["messages"]))
-            create_background_task(get_cost_guard().record(user_id or "anonymous", response["messages"]))
+            create_background_task(get_cost_guard().record(user_id or "anonymous", usage))
             if question:
                 create_background_task(self._store_in_cache(question, response["messages"]))
             return self.__process_messages(response["messages"])
@@ -561,7 +567,10 @@ class LangGraphAgent:
         Yields:
             str: Tokens of the LLM response.
         """
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.LANGFUSE_TRACING_ENABLED else []
+        usage = TurnUsage()  # every model call of this turn, nested ones included, for the cost guard
+        callbacks: list[BaseCallbackHandler] = [usage]
+        if settings.LANGFUSE_TRACING_ENABLED:
+            callbacks.append(langfuse_callback_handler)
         config: RunnableConfig = {
             "configurable": {"thread_id": session_id},
             "callbacks": callbacks,
@@ -637,7 +646,7 @@ class LangGraphAgent:
                 yield str(interrupt_value)
             elif state.values and "messages" in state.values:
                 create_background_task(memory_service.add(user_id, state.values["messages"]))
-                create_background_task(get_cost_guard().record(user_id or "anonymous", state.values["messages"]))
+                create_background_task(get_cost_guard().record(user_id or "anonymous", usage))
                 if question:
                     create_background_task(self._store_in_cache(question, state.values["messages"]))
         except GraphInterrupt:

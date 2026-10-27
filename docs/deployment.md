@@ -38,10 +38,16 @@ Valkey, Prometheus (with the SLO alert rules) and Grafana.
 ## Cost guard
 
 Rate limits cap requests; the cost guard caps money. Each user gets a monthly USD budget.
-Every model reply in a turn reports its token usage; the guard prices it with your table and
-adds it to the user's total for the month (UTC), kept in Valkey when `VALKEY_HOST` is set,
-otherwise in process memory. Once the budget is spent the API answers **402** before any model
-is called.
+A `TurnUsage` callback handler rides along with each turn and collects the token usage of every
+chat model call in it: the answer, the LLM policy rail, and every call a deep-research sub-agent
+makes (a reply reported by both `ResilientChatModel` and the provider model under it is counted
+once, by message id). The guard prices the calls with your table and adds them to the user's
+total for the month (UTC), kept in Valkey when `VALKEY_HOST` is set, otherwise in process memory.
+Once the budget is spent the API answers **402** before any model is called.
+
+Prices are looked up by the exact model name, then by the longest listed prefix, because
+providers report dated snapshots (`gpt-5.4-mini-2026-01-01` is priced as `gpt-5.4-mini`).
+Long-term memory (mem0) calls OpenAI with its own client and is not counted.
 
 ```bash
 COST_MONTHLY_BUDGET_USD=5

@@ -2,9 +2,10 @@
 
 Rate limits cap the number of requests; this caps money: ten requests a minute
 with 50k tokens each still empties a budget. Spend is computed from the token
-usage the provider reports on every model reply in a turn, priced with your
-own table, and kept per user per calendar month (UTC) in the cache service
-(Valkey when configured, otherwise process memory).
+usage the provider reports on every chat model call in a turn (the answer, the
+LLM policy rail, every call a sub-agent makes), collected by a ``TurnUsage``
+callback handler, priced with your own table, and kept per user per calendar
+month (UTC) in the cache service (Valkey when configured, otherwise process memory).
 """
 
 import json
@@ -15,13 +16,12 @@ from datetime import (
 from typing import (
     Any,
     Optional,
+    override,
 )
 
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-)
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import LLMResult
 
 from app.core.cache import cache_service
 from app.core.config import settings
@@ -32,6 +32,41 @@ KEY_TTL_SECONDS = 40 * 24 * 3600  # keep last month's total around for reconcili
 
 class BudgetExceededError(Exception):
     """The user's monthly budget is used up."""
+
+
+class TurnUsage(BaseCallbackHandler):
+    """Callback handler that collects the token usage of every chat model call in one turn.
+
+    Pass it in the run's ``callbacks``; nested calls (structured output, sub-agents)
+    report to it as well. A wrapper model such as ``ResilientChatModel`` reports the
+    same reply as the provider model it called, so replies are counted once per
+    message id.
+    """
+
+    def __init__(self):
+        """Start an empty tally."""
+        self.calls: list[tuple[str, int, int]] = []  # (model name, input tokens, output tokens)
+        self._seen: set[str] = set()
+
+    def add(self, model: str, input_tokens: int, output_tokens: int) -> None:
+        """Record one call directly (for callers outside LangChain, and tests)."""
+        self.calls.append((model, input_tokens, output_tokens))
+
+    @override
+    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+        """Add the usage of every generated message not counted yet."""
+        for generations in response.generations:
+            for generation in generations:
+                message = getattr(generation, "message", None)
+                if not isinstance(message, AIMessage) or not message.usage_metadata:
+                    continue
+                usage = message.usage_metadata
+                if message.id:
+                    if message.id in self._seen:
+                        continue
+                    self._seen.add(message.id)
+                model = str((message.response_metadata or {}).get("model_name", "unknown"))
+                self.add(model, usage.get("input_tokens", 0), usage.get("output_tokens", 0))
 
 
 class CostGuard:
@@ -81,26 +116,24 @@ class CostGuard:
     def _price(self, model: str) -> tuple[float, float]:
         if model in self._prices:
             return self._prices[model]
+        # Providers report dated snapshots ("gpt-5.4-mini-2026-01-01"): use the longest listed prefix.
+        prefixes = [name for name in self._prices if model.startswith(name)]
+        if prefixes:
+            return self._prices[max(prefixes, key=len)]
         if model not in self._warned:
             self._warned.add(model)
             logger.warning("cost_price_missing", model=model, using=self._default)
         return self._default
 
-    def cost_of_turn(self, messages: list[BaseMessage]) -> float:
-        """USD cost of the model replies after the latest user message."""
+    def cost_of(self, usage: TurnUsage) -> float:
+        """USD cost of the calls collected in ``usage``."""
         total = 0.0
-        for message in reversed(messages):
-            if isinstance(message, HumanMessage):
-                break
-            usage = getattr(message, "usage_metadata", None) if isinstance(message, AIMessage) else None
-            if not usage:
-                continue
-            model = str((message.response_metadata or {}).get("model_name", "unknown"))
+        for model, input_tokens, output_tokens in usage.calls:
             price_in, price_out = self._price(model)
-            total += usage.get("input_tokens", 0) * price_in / 1e6 + usage.get("output_tokens", 0) * price_out / 1e6
+            total += input_tokens * price_in / 1e6 + output_tokens * price_out / 1e6
         return total
 
-    async def record(self, user_id: str, messages: list[BaseMessage]) -> float:
+    async def record(self, user_id: str, usage: TurnUsage) -> float:
         """Add this turn's cost to the user's monthly total; returns the cost.
 
         Read-then-write, so concurrent turns of one user can undercount slightly;
@@ -108,7 +141,7 @@ class CostGuard:
         """
         if not self.enabled:
             return 0.0
-        cost = self.cost_of_turn(messages)
+        cost = self.cost_of(usage)
         if cost > 0:
             key = self._key(user_id)
             current = float(await self._cache.get(key) or 0.0)
