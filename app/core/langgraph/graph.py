@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import (
+    Any,
     AsyncGenerator,
     Optional,
 )
@@ -87,6 +88,16 @@ NO_MEMORY = "No relevant memory found."
 
 # Tools that call interrupt() to ask the human; run before any other tool of the same turn.
 INTERRUPTING_TOOLS = frozenset({"ask_human"})
+
+
+def _is_streamable(meta: Any) -> bool:
+    """Forward model tokens only from the chat node; messages written to state (a refusal) always.
+
+    Chat model runs carry ``ls_model_type`` metadata. A model call in any other node (the
+    policy rail's classifier, a summarizer) is internal even when it lacks the ``nostream`` tag.
+    """
+    from_model = isinstance(meta, dict) and "ls_model_type" in meta
+    return not from_model or meta.get("langgraph_node") == "chat"
 
 
 class LangGraphAgent:
@@ -618,12 +629,14 @@ class LangGraphAgent:
             redactor = get_guardrails().stream_redactor()
             emitted = False
             try:
-                async for token, _ in graph.astream(
+                async for token, meta in graph.astream(
                     graph_input,
                     config,
                     stream_mode="messages",
                 ):
                     if not isinstance(token, (AIMessage, AIMessageChunk)):
+                        continue
+                    if not _is_streamable(meta):
                         continue
 
                     text = redactor.feed(extract_text_content(token.content))

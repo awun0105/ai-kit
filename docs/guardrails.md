@@ -36,7 +36,9 @@ crypto prices, maths, films) and asking for someone else's ID number. That is th
 LLM rail's job, configured with a one-sentence scope in `GUARD_LLM_RAIL_POLICY`.
 The classifier call is tagged `nostream` (`llm_service.call(..., config={"tags": ["nostream"]})`):
 it runs inside the graph's `input_guard` node, and without the tag LangGraph's message stream
-would send its JSON verdict to the client ahead of the answer.
+would send its JSON verdict to the client ahead of the answer. As a second line,
+`/chat/stream` forwards model tokens only from the `chat` node (plus messages a node writes to
+state, such as a refusal), so a custom classifier without the tag does not leak either.
 
 Detected data: email, Vietnamese phone numbers (`0…`, `+84…`, with separators),
 CCCD (12 digits, province code checked), CMND (9 digits, only next to an ID keyword
